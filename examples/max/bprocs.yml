@@ -1,0 +1,78 @@
+# Every setting bprocs knows, each used at least once.
+
+theme: catppuccin           # tokyo-night (default), dracula, nord, gruvbox or catppuccin
+scrollback: 20000           # lines kept for each proc; default 10000
+env_file: [.env, .env.local] # read in order, for every proc, before env:
+env:
+  RAILS_ENV: development
+  LANG: en_US.UTF-8
+  RUBYOPT: null             # null removes a variable the procs would inherit
+log_dir: log/bprocs         # where log: true writes; this is the default
+
+procs:
+  db:
+    run: [postgres, -D, .data/db]       # a list runs as it is, without a shell
+    port: 5432                          # sets $PORT; shown in the list; checked before starting
+    ready: { cmd: pg_isready -q, every: 500ms, timeout: 30s }
+    health: { port: 5432, every: 30s }  # a failing check restarts it only when restart: says so
+    stop: { signal: SIGINT, timeout: 20s }  # postgres shuts down fast on SIGINT
+    log: true                           # log/bprocs/db.log
+    color: "#89b4fa"
+
+  redis:
+    run: redis-server --port 6379
+    port: 6379
+    ready: { log: Ready to accept connections }
+    restart: always
+
+  migrate:
+    run: |                              # text runs in /bin/sh -c, so scripts work
+      bin/rails db:prepare
+      bin/rails db:seed
+    job: true                           # runs to the end; procs that need it wait for exit 0
+    needs: [db]
+    log: log/migrations.log             # or a path of its own
+
+  web:
+    run: bin/rails server -b 127.0.0.1
+    cwd: .                              # relative to this file; this is the default
+    env_file: web.env                   # after the top level's files and env
+    env: { WEB_CONCURRENCY: 2 }         # after env_file, so it wins
+    port: 3000
+    needs: [db, redis, migrate]
+    ready: { http: /up, every: 1s, timeout: 90s }   # a path uses the proc's own port
+    health: { http: /up, every: 10s, failures: 3 }  # 3 failures in a row restart it
+    restart: on-failure                 # no (default), on-failure or always
+    stop: SIGTERM                       # SIGINT, SIGTERM or SIGKILL; 5s before SIGKILL
+    log: true
+
+  worker:
+    run: bundle exec sidekiq -C config/sidekiq.yml
+    needs: [db, redis]
+    health: { cmd: [bin/sidekiq-alive], every: 15s, failures: 2 }
+    restart: always
+    stop: { signal: SIGTERM, timeout: 30s }   # let running jobs finish
+
+  api:
+    run: node server.js
+    cwd: services/api
+    port: 4000
+    ready: { http: "http://127.0.0.1:4000/health", timeout: 20s }  # or a whole URL
+    restart: on-failure
+
+  css:
+    run: bin/rails tailwindcss:watch
+    restart: always
+
+  tests:
+    run: bin/rspec
+    job: true
+    needs: [web, worker]
+    autostart: false                    # bprocs run tests --wait tests in CI
+
+  console:
+    run: bin/rails console
+    needs: [db]
+    autostart: false                    # start it with s, attach with enter
+    stop: SIGINT
+    color: "#f9e2af"

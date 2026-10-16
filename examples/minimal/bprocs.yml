@@ -1,0 +1,6 @@
+# The least a config needs: a name and what to run for each proc.
+procs:
+  web:
+    run: bin/rails server
+  worker:
+    run: bundle exec sidekiq

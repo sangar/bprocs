@@ -1,0 +1,38 @@
+# A typical web app: a database and a cache, a migration that runs once,
+# and the app and its worker started once what they need is up.
+env_file: .env
+
+procs:
+  db:
+    run: postgres -D .data/db
+    port: 5432
+    ready: { port: 5432 }
+
+  redis:
+    run: redis-server --port 6379
+    port: 6379
+    ready: { port: 6379 }
+
+  migrate:
+    run: bin/rails db:migrate
+    job: true
+    needs: [db]
+
+  web:
+    run: bin/rails server
+    port: 3000
+    needs: [db, redis, migrate]
+    ready: { http: /up, timeout: 60s }
+    restart: on-failure
+
+  worker:
+    run: bundle exec sidekiq
+    needs: [db, redis]
+    restart: always
+
+  css:
+    run: bin/rails tailwindcss:watch
+
+  console:
+    run: bin/rails console
+    autostart: false

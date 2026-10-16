@@ -1,0 +1,63 @@
+#include "layout.h"
+
+enum {
+    SYSTEM_MIN_HEIGHT = 30,
+    SYSTEM_MIN_WIDTH = 70,
+    NETWORK_MIN_WIDTH = 110,
+    SIDE_BY_SIDE_MIN_WIDTH = 96,
+    DETAIL_MIN_HEIGHT = 8,
+    LIST_CHROME = 3, // two borders and the column header
+};
+
+static int clamp(int value, int low, int high)
+{
+    return value < low ? low : value > high ? high : value;
+}
+
+Layout layout_compute(int width, int height, size_t proc_count)
+{
+    Layout layout = { .footer = { 0, height - 1, width, 1 } };
+    int top = 0;
+    int body = height - 1;
+    if (height >= SYSTEM_MIN_HEIGHT && width >= SYSTEM_MIN_WIDTH) {
+        int band = clamp(height / 4, 7, 11);
+        layout.show_system = true;
+        layout.show_network = width >= NETWORK_MIN_WIDTH;
+        int cpu_width = width * (layout.show_network ? 44 : 56) / 100;
+        int memory_width = layout.show_network ? (width - cpu_width) / 2 : width - cpu_width;
+        layout.cpu = (Rect) { 0, 0, cpu_width, band };
+        layout.memory = (Rect) { cpu_width, 0, memory_width, band };
+        layout.network = (Rect) { cpu_width + memory_width, 0, width - cpu_width - memory_width, band };
+        top = band;
+        body -= band;
+    }
+    int list_rows = (int)proc_count + LIST_CHROME;
+    if (width >= SIDE_BY_SIDE_MIN_WIDTH) {
+        int side = clamp(width * 36 / 100, 46, 72);
+        int list_height = clamp(list_rows, 5, body);
+        int detail_height = body - list_height;
+        if (detail_height < DETAIL_MIN_HEIGHT && body >= list_rows / 2 + DETAIL_MIN_HEIGHT + 4) {
+            list_height = body - DETAIL_MIN_HEIGHT;
+            detail_height = DETAIL_MIN_HEIGHT;
+        }
+        layout.show_detail = detail_height >= DETAIL_MIN_HEIGHT;
+        layout.procs = (Rect) { 0, top, side, layout.show_detail ? list_height : body };
+        layout.detail = (Rect) { 0, top + list_height, side, detail_height };
+        layout.log = (Rect) { side, top, width - side, body };
+        return layout;
+    }
+    int list_height = clamp(list_rows, 5, body / 2);
+    layout.procs = (Rect) { 0, top, width, list_height };
+    layout.log = (Rect) { 0, top + list_height, width, body - list_height };
+    return layout;
+}
+
+Rect rect_inner(Rect rect)
+{
+    return (Rect) { rect.x + 1, rect.y + 1, rect.width - 2, rect.height - 2 };
+}
+
+bool rect_contains(Rect rect, int x, int y)
+{
+    return x >= rect.x && y >= rect.y && x < rect.x + rect.width && y < rect.y + rect.height;
+}

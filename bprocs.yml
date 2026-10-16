@@ -1,0 +1,79 @@
+# A demo of bprocs: harmless processes that show what it does.
+# Run bprocs from this directory, or pass another config with -f.
+theme: tokyo-night
+
+procs:
+  db:
+    run: |
+      echo "pretend postgres is warming up"
+      sleep 2
+      echo "database system is ready to accept connections"
+      while :; do sleep 60; done
+    ready: { log: ready to accept connections }
+
+  migrate:
+    run: |
+      echo "== CreateSubscribers: migrating"
+      sleep 1
+      echo "== CreateSubscribers: migrated (0.0042s)"
+    job: true
+    needs: [db]
+
+  web:
+    run: |
+      printf 'Puma starting in single mode...\n'
+      sleep 1
+      printf '* Listening on \033[1mhttp://127.0.0.1:%s\033[0m\n' "$PORT"
+      while :; do
+        for path in / /dashboard /api/subscribers /newsletters/42 /assets/app.css; do
+          n=$((n + 1)); ms=$(( (n * 37) % 120 + 3 ))
+          printf '\033[36mStarted\033[0m GET \033[1m"%s"\033[0m for 127.0.0.1\n' "$path"
+          printf '\033[32mCompleted 200 OK\033[0m in %dms \033[90m(Views: %dms | ActiveRecord: %dms)\033[0m\n' $ms $((ms / 2)) $((ms / 3))
+          sleep 0.$(( n % 9 + 1 ))
+        done
+      done
+    port: 3000
+    needs: [db, migrate]
+    ready: { log: Listening on }
+
+  worker:
+    run: |
+      n=0
+      while :; do
+        n=$((n + 1))
+        i=0; while [ $i -lt 60000 ]; do i=$((i + 1)); done
+        printf '\033[35m[worker]\033[0m job \033[1m#%d\033[0m SendNewsletterJob \033[32mdone\033[0m\n' $n
+        sleep 1
+      done
+    needs: [db]
+    restart: always
+
+  flaky:
+    run: |
+      echo "connecting to the queue..."
+      sleep 4
+      echo "lost the connection" >&2
+      exit 1
+    restart: on-failure
+
+  progress:
+    run: |
+      while :; do
+        p=0
+        while [ $p -le 100 ]; do
+          printf '\rbuilding assets [%-20s] %3d%%' "$(printf '%*s' $((p / 5)) '' | tr ' ' '#')" $p
+          p=$((p + 5)); sleep 0.2
+        done
+        printf '\n\033[32m✔ assets built\033[0m\n'
+        sleep 3
+      done
+
+  console:
+    run: |
+      echo "a tiny REPL: attach with enter, type a line, detach with ctrl-a"
+      while printf '\033[33mirb>\033[0m '; read -r line; do
+        echo "=> \"$line\""
+      done
+    port: 3035
+    autostart: false
+    stop: { signal: SIGINT, timeout: 2s }
