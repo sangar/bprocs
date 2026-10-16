@@ -7,9 +7,11 @@
 //     ./nob test            build and run the tests (debug)
 //     ./nob check           modern-c contract check, then the tests
 //     ./nob cross           release binary for every target with zig cc
+//     ./nob install         release binary              -> $DESTDIR$PREFIX/bin/bprocs
+//     ./nob uninstall       remove $DESTDIR$PREFIX/bin/bprocs
 //     ./nob clean           remove out/
 //
-// Host builds compile with $CC, or cc when it is unset.
+// Host builds compile with $CC, or cc when it is unset. $PREFIX defaults to ~/.local.
 
 #include <dirent.h>
 #include <errno.h>
@@ -507,6 +509,69 @@ static void rebuild_self_if_needed(char **argv)
     exit(1);
 }
 
+// installed_paths writes $DESTDIR$PREFIX/bin and the binary's path in it.
+// PREFIX defaults to ~/.local; DESTDIR stages the install for packaging.
+static void installed_paths(char *bin_dir, char *binary)
+{
+    const char *destdir = getenv("DESTDIR");
+    const char *prefix = getenv("PREFIX");
+    char default_prefix[PATH_MAX_LEN];
+    if (prefix == NULL || prefix[0] == '\0') {
+        const char *home = getenv("HOME");
+        if (home == NULL || home[0] == '\0') {
+            fprintf(stderr, "build: set PREFIX or HOME to install\n");
+            exit(2);
+        }
+        snprintf(default_prefix, sizeof default_prefix, "%s/.local", home);
+        prefix = default_prefix;
+    }
+    snprintf(bin_dir, PATH_MAX_LEN, "%s%s/bin", destdir != NULL ? destdir : "", prefix);
+    snprintf(binary, PATH_MAX_LEN, "%s/bprocs", bin_dir);
+}
+
+static int run_install(void)
+{
+    Build build;
+    configure(&build, true, NULL);
+    char built[PATH_MAX_LEN];
+    build_program(&build, built);
+    char bin_dir[PATH_MAX_LEN];
+    char installed[PATH_MAX_LEN];
+    installed_paths(bin_dir, installed);
+    Command make_dir = { 0 };
+    command_push(&make_dir, "install");
+    command_push(&make_dir, "-d");
+    command_push(&make_dir, bin_dir);
+    run_or_die(&make_dir);
+    Command copy = { 0 };
+    command_push(&copy, "install");
+    command_push(&copy, "-m");
+    command_push(&copy, "755");
+    command_push(&copy, built);
+    command_push(&copy, installed);
+    run_or_die(&copy);
+    printf("installed %s\n", installed);
+    return 0;
+}
+
+static int run_uninstall(void)
+{
+    char bin_dir[PATH_MAX_LEN];
+    char installed[PATH_MAX_LEN];
+    installed_paths(bin_dir, installed);
+    if (access(installed, F_OK) != 0) {
+        printf("nothing installed at %s\n", installed);
+        return 0;
+    }
+    Command command = { 0 };
+    command_push(&command, "rm");
+    command_push(&command, "-f");
+    command_push(&command, installed);
+    run_or_die(&command);
+    printf("removed %s\n", installed);
+    return 0;
+}
+
 static int run_check(void)
 {
     const char *home = getenv("HOME");
@@ -535,6 +600,12 @@ int main(int argc, char **argv)
     if (strcmp(mode, "cross") == 0) {
         return run_cross();
     }
+    if (strcmp(mode, "install") == 0) {
+        return run_install();
+    }
+    if (strcmp(mode, "uninstall") == 0) {
+        return run_uninstall();
+    }
 
     Build build;
     configure(&build, strcmp(mode, "release") == 0, NULL);
@@ -552,6 +623,6 @@ int main(int argc, char **argv)
         return status != 0 ? status : build_and_run_tests(&build);
     }
 
-    fprintf(stderr, "build: unknown mode '%s'\nmodes: build, release, test, check, cross, clean\n", mode);
+    fprintf(stderr, "build: unknown mode '%s'\nmodes: build, release, test, check, cross, install, uninstall, clean\n", mode);
     return 2;
 }

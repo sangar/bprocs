@@ -173,6 +173,8 @@ Windows is not supported: it has no pseudo-terminals of the POSIX kind, and libm
 | `./nob test` | builds and runs the tests under the sanitizers |
 | `./nob check` | runs the `modern-c` contract checker, then the tests |
 | `./nob cross` | release binaries for every platform: `out/<platform>/release/bprocs` |
+| `./nob install` | optimised build, installed as `$PREFIX/bin/bprocs`; `PREFIX` defaults to `~/.local`, and `DESTDIR` stages it for packaging |
+| `./nob uninstall` | removes what `./nob install` placed |
 | `./nob clean` | removes `out/` |
 
 ## Layout
