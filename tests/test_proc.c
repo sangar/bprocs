@@ -172,6 +172,15 @@ static void proc_writes_its_log_file(Test *test)
     test_check(test, dir_remove_all(dir, nullptr) == ERR_OK, "clean up");
 }
 
+static void proc_status_failed_only_without_a_restart_coming(Test *test)
+{
+    test_check(test, proc_status_failed((ProcStatus) { .state = PROC_CRASHED }), "a crash is a failure");
+    test_check(test, proc_status_failed((ProcStatus) { .state = PROC_BLOCKED }), "so is being blocked");
+    test_check(test, !proc_status_failed((ProcStatus) { .state = PROC_CRASHED, .restart_at_ns = 1 }),
+               "a crash with a restart coming is not");
+    test_check(test, !proc_status_failed((ProcStatus) { .state = PROC_EXITED }), "nor is exiting with 0");
+}
+
 const TestCase PROC_TESTS[] = {
     { "proc_reports_how_a_run_ended", proc_reports_how_a_run_ended },
     { "proc_waits_for_ready_and_stops", proc_waits_for_ready_and_stops },
@@ -180,5 +189,6 @@ const TestCase PROC_TESTS[] = {
     { "proc_restarts_what_crashes", proc_restarts_what_crashes },
     { "proc_passes_input_to_the_program", proc_passes_input_to_the_program },
     { "proc_writes_its_log_file", proc_writes_its_log_file },
+    { "proc_status_failed_only_without_a_restart_coming", proc_status_failed_only_without_a_restart_coming },
     { nullptr, nullptr },
 };

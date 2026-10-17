@@ -39,7 +39,7 @@ The config is found in the current directory or the nearest one above it: `bproc
 | `bprocs up [NAME…]` | start the daemon and the autostart procs, or the named ones, and return |
 | `bprocs down` | stop every proc, the ones that need others first, then the daemon |
 | `bprocs start\|stop\|restart\|kill NAME…` | one or more procs; starting one starts what it needs |
-| `bprocs ps [--json]` | state, health, pid, port, CPU, memory, uptime and restarts |
+| `bprocs ps [--json] [--fail]` | state, health, pid, port, CPU, memory, uptime and restarts; `--fail` exits with 1 when a proc failed with no restart coming |
 | `bprocs logs NAME [-n N] [-f]` | a proc's output, the last N lines, followed with `-f` |
 | `bprocs attach NAME` | type into a proc on this terminal; ctrl-a d detaches |
 | `bprocs wait NAME… [--timeout 2m]` | until each is up, or a job has succeeded |

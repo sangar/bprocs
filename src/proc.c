@@ -60,6 +60,12 @@ bool proc_state_active(ProcState state)
     return state == PROC_STARTING || state == PROC_RUNNING || state == PROC_STOPPING;
 }
 
+bool proc_status_failed(ProcStatus status)
+{
+    bool failed = status.state == PROC_CRASHED || status.state == PROC_FAILED || status.state == PROC_BLOCKED;
+    return failed && status.restart_at_ns == 0;
+}
+
 const char *proc_state_name(ProcState state)
 {
     return STATE_NAMES[state];

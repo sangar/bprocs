@@ -56,6 +56,10 @@ typedef struct ProcStatus {
     char problem[PROC_PROBLEM_LIMIT];
 } ProcStatus;
 
+// proc_status_failed is whether a proc crashed, could not start or is blocked,
+// with no restart coming.
+bool proc_status_failed(ProcStatus status);
+
 // ProcHooks lets the owner hear what a Proc does. wake is called on the
 // reader thread when output or an exit arrives. output and note, when set,
 // are called with the Proc's lock held, so they see every byte and note in

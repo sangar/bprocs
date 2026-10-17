@@ -134,9 +134,7 @@ static String not_up(Runner *runner)
 static bool failed_proc(Runner *runner, size_t *index)
 {
     for (size_t i = 0; i < supervisor_count(runner->supervisor); i++) {
-        ProcStatus status = proc_status(supervisor_proc(runner->supervisor, i));
-        bool failed = status.state == PROC_CRASHED || status.state == PROC_FAILED || status.state == PROC_BLOCKED;
-        if (failed && status.restart_at_ns == 0) {
+        if (proc_status_failed(proc_status(supervisor_proc(runner->supervisor, i)))) {
             *index = i;
             return true;
         }

@@ -42,7 +42,7 @@ static const char USAGE[] =
     "  up [NAME…]              start the daemon and the autostart procs, or the named ones\n"
     "  down                    stop every proc, then the daemon\n"
     "  start|stop|restart|kill NAME…\n"
-    "  ps [--json]             what each proc is doing\n"
+    "  ps [--json] [--fail]    what each proc is doing; --fail exits 1 when one failed\n"
     "  logs NAME [-n N] [-f]   a proc's output; -f follows it\n"
     "  attach NAME             type into a proc on this terminal; ctrl-a d detaches\n"
     "  wait NAME… [--timeout D]  until each is up, or a job has succeeded\n"
@@ -361,9 +361,31 @@ static String state_text(Arena *arena, ProcStatus status)
     return S(proc_state_name(status.state));
 }
 
+// any_failed is whether a proc in the status reply failed with no restart coming.
+static bool any_failed(const Node *procs)
+{
+    for (size_t i = 0; procs != nullptr && i < procs->count; i++) {
+        if (proc_status_failed(status_from_node(procs->items[i]))) {
+            return true;
+        }
+    }
+    return false;
+}
+
 static int run_ps(Arena *arena, const Options *options)
 {
-    bool json = options->args.count > 0 && str_equal(options->args.items[0], S("--json"));
+    bool json = false;
+    bool fail_on_failure = false;
+    for (size_t i = 0; i < options->args.count; i++) {
+        String arg = options->args.items[i];
+        if (str_equal(arg, S("--json"))) {
+            json = true;
+        } else if (str_equal(arg, S("--fail"))) {
+            fail_on_failure = true;
+        } else {
+            return fail("ps takes --json and --fail");
+        }
+    }
     Client *client;
     bool started;
     int status = connect_daemon(arena, options, false, &client, &started);
@@ -378,11 +400,12 @@ static int run_ps(Arena *arena, const Options *options)
     }
     const ClientInfo *info = client_info(client);
     const Node *procs = node_get(reply, S("procs"));
+    int result = fail_on_failure && any_failed(procs) ? EXIT_FAILED : EXIT_OK;
     if (json) {
         String text = message_encode(arena, procs);
         printf("%.*s\n", (int)text.len, text.data);
         client_close(client);
-        return EXIT_OK;
+        return result;
     }
     int64_t now = node_get_int(reply, S("now_ns"), 0);
     Table table = table_create(arena);
@@ -410,7 +433,7 @@ static int run_ps(Arena *arena, const Options *options)
     String text = table_format(&table);
     fwrite(text.data, 1, text.len, stdout);
     client_close(client);
-    return EXIT_OK;
+    return result;
 }
 
 // ---- following output ----
