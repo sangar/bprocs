@@ -86,6 +86,26 @@ With `--wait`, it stops everything once that proc ends and exits with its exit s
 
 ## Configuration
 
+The simplest config is a `Procfile`, read as foreman reads one:
+
+```
+web: bin/rails server -p $PORT
+worker: bundle exec sidekiq
+```
+
+A `bprocs.yml` names each proc and what it runs; every other setting is optional:
+
+```yaml
+procs:
+  web:
+    run: bin/rails server
+    port: 3000
+  worker:
+    run: bundle exec sidekiq
+```
+
+A web app with a database, with most settings:
+
 ```yaml
 theme: tokyo-night       # optional
 scrollback: 10000        # lines kept per process, optional
@@ -142,11 +162,6 @@ An unknown setting is an error with its line, so a typo does not go unnoticed, a
 ### Procfile
 
 A `Procfile`, `Procfile.dev` or any other `Procfile.*` is read as foreman reads one:
-
-```
-web: bin/rails server -p $PORT
-worker: bundle exec sidekiq
-```
 
 - Each line is `name: command`. The name is letters, digits, `-` and `_`, and the command runs in `/bin/sh -c`. Blank lines and `#` comments are skipped, and any other line is an error with its line number.
 - A `.env` beside the Procfile is read when there is one.
