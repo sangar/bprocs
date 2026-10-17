@@ -67,10 +67,14 @@ enum { DEFAULT_SCROLLBACK = 10000 };
 // config_parse reads the text of the config at path, an absolute path that
 // relative paths in it start from. A Procfile, or Procfile.dev or any other
 // Procfile.*, is read as foreman reads one, with the .env beside it; any other
-// name is a bprocs.yml. A config that does not say what to run, or says it in
-// a way bprocs does not know, is ERR_PARSE with the line in err. The env_file:
-// files it names are read.
-[[nodiscard]] Error config_parse(Arena *arena, String text, String path, Config *config, Err *err);
+// name is a bprocs.yml. inherited_port is the PORT bprocs runs with, 0 when
+// there is none: a Procfile's ports start from it when its .env sets no PORT.
+// A config that does not say what to run, or says it in a way bprocs does not
+// know, is ERR_PARSE with the line in err. The env_file: files it names are
+// read.
+[[nodiscard]] Error config_parse(Arena *arena, String text, String path, int inherited_port, Config *config,
+                                 Err *err);
+// config_load reads the config at path with the PORT of this process's environment.
 [[nodiscard]] Error config_load(Arena *arena, String path, Config *config, Err *err);
 // config_find looks for bprocs.yml, bprocs.yaml, Procfile.dev or Procfile,
 // in that order, in directory and then in each directory above it.

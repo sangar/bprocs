@@ -23,6 +23,7 @@ typedef struct Reader {
     String directory;
     StringList env; // the top level's env_file: and env:, which every proc starts from
     String log_dir;
+    int inherited_port; // the PORT bprocs runs with, 0 when there is none
     Err *err;
 } Reader;
 
@@ -362,6 +363,13 @@ static String command_text(Arena *arena, StringList argv, bool script)
     return ERR_OK;
 }
 
+// port_number is text as a port number, 0 when it is not one.
+static int port_number(String text)
+{
+    uint64_t number;
+    return str_parse_u64(text, &number) && number > 0 && number < 65536 ? (int)number : 0;
+}
+
 // port_from_env is the value of the last PORT among the env entries, 0 when there is none.
 static int port_from_env(StringList env)
 {
@@ -369,11 +377,8 @@ static int port_from_env(StringList env)
     for (size_t i = 0; i < env.count; i++) {
         String name;
         String value;
-        uint64_t number;
-        if (str_cut(env.items[i], '=', &name, &value) && str_equal(name, S("PORT")) && str_parse_u64(value, &number) &&
-            number > 0 && number < 65536) {
-            port = (int)number;
-        }
+        int number = str_cut(env.items[i], '=', &name, &value) && str_equal(name, S("PORT")) ? port_number(value) : 0;
+        port = number > 0 ? number : port;
     }
     return port;
 }
@@ -719,9 +724,9 @@ static bool is_procfile_name(String name)
 }
 
 // read_procfile reads a Procfile as foreman does: name: command lines run in
-// sh -c, with the .env beside it and PORT from 5000 up in steps of 100, or
-// from the .env's PORT up. That PORT is not the proc's port, as bprocs cannot
-// tell whether the program listens on it.
+// sh -c, with the .env beside it and PORT in steps of 100 from the .env's
+// PORT, else the inherited PORT, else 5000. That PORT is not the proc's port,
+// as bprocs cannot tell whether the program listens on it.
 [[nodiscard]] static Error read_procfile(Reader *reader, String text, Config *config)
 {
     Arena *arena = reader->arena;
@@ -731,6 +736,7 @@ static bool is_procfile_name(String name)
         return e;
     }
     int port = port_from_env(dotenv);
+    port = port > 0 ? port : reader->inherited_port;
     port = port > 0 ? port : PROCFILE_FIRST_PORT;
     StringList lines = str_split(arena, text, '\n');
     config->procs = arena_push(arena, arena_size_mul(lines.count, sizeof(ProcSpec)));
@@ -770,12 +776,13 @@ static bool is_procfile(String path)
     return str_equal(base, S("Procfile")) || str_starts_with(base, S("Procfile."));
 }
 
-Error config_parse(Arena *arena, String text, String path, Config *config, Err *err)
+Error config_parse(Arena *arena, String text, String path, int inherited_port, Config *config, Err *err)
 {
     *config = (Config) { .path = path, .directory = path_dir(path), .scrollback = DEFAULT_SCROLLBACK };
     Reader reader = {
         .arena = arena,
         .directory = config->directory,
+        .inherited_port = inherited_port,
         .err = err,
     };
     if (is_procfile(path)) {
@@ -808,7 +815,9 @@ Error config_load(Arena *arena, String path, Config *config, Err *err)
     if (read != ERR_OK) {
         return read;
     }
-    Error parsed = config_parse(arena, text, absolute, config, err);
+    String inherited;
+    int inherited_port = env_get(arena, S("PORT"), &inherited) ? port_number(inherited) : 0;
+    Error parsed = config_parse(arena, text, absolute, inherited_port, config, err);
     if (parsed != ERR_OK) {
         return err_wrap(err, parsed, "%.*s", (int)path.len, path.data);
     }

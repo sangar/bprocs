@@ -143,7 +143,7 @@ static void server_serves_clients_until_down(Test *test)
     String dir;
     test_check(test, dir_create_temp(a, S("bprocs-test-"), &dir, &err) == ERR_OK, "a temp dir");
     Config config;
-    test_check(test, config_parse(a, S(CONFIG), path_join(a, dir, S("bprocs.yml")), &config, &err) == ERR_OK,
+    test_check(test, config_parse(a, S(CONFIG), path_join(a, dir, S("bprocs.yml")), 0, &config, &err) == ERR_OK,
                err.msg);
     RuntimePaths paths = {
         .socket = path_join(a, dir, S("bprocs.sock")),

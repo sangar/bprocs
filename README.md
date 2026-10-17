@@ -150,7 +150,7 @@ worker: bundle exec sidekiq
 
 - Each line is `name: command`. The name is letters, digits, `-` and `_`, and the command runs in `/bin/sh -c`. Blank lines and `#` comments are skipped, and any other line is an error with its line number.
 - A `.env` beside the Procfile is read when there is one.
-- `PORT` is 5000 for the first proc, 5100 for the next and so on, or starts at the `.env`'s `PORT`. It is not the proc's `port`: bprocs cannot tell whether the program listens on it, so the list shows no port, and a port in use does not stop the proc from starting.
+- `PORT` is 5000 for the first proc, 5100 for the next and so on, or starts at the `.env`'s `PORT`, else at the `PORT` bprocs runs with. That is the daemon's, from when it started: a `bprocs reload` does not see a `PORT` changed since. It is not the proc's `port`: bprocs cannot tell whether the program listens on it, so the list shows no port, and a port in use does not stop the proc from starting.
 - Every proc gets the defaults above, so it starts with the others, does not restart, and has no checks. For needs, checks, restarts or log files, write a `bprocs.yml`.
 
 ## Profile

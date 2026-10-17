@@ -26,7 +26,7 @@ static bool setup(Test *test, Fixture *fixture, const char *yaml)
     test_check(test, dir_create_temp(test->arena, S("bprocs-test-"), &fixture->dir, &err) == ERR_OK, "a temp dir");
     String path = path_join(test->arena, fixture->dir, S("bprocs.yml"));
     String text = str_replace_all(test->arena, S(yaml), S("$DIR"), fixture->dir);
-    bool parsed = config_parse(test->arena, text, path, &fixture->config, &err) == ERR_OK;
+    bool parsed = config_parse(test->arena, text, path, 0, &fixture->config, &err) == ERR_OK;
     test_check(test, parsed, err.msg);
     bool created = parsed && supervisor_create(&fixture->config, (ProcHooks) { .wake = ignore }, &fixture->supervisor,
                                                &err) == ERR_OK;
@@ -224,7 +224,7 @@ static void reload_keeps_what_runs_the_same(Test *test)
                     "  added: { run: sleep 30 }\n"
                     "  same: { run: sleep 30, color: \"#ff0000\" }\n"
                     "  changed: { run: sleep 31 }\n");
-    test_check(test, config_parse(test->arena, text, f.config.path, &next, &err) == ERR_OK, err.msg);
+    test_check(test, config_parse(test->arena, text, f.config.path, 0, &next, &err) == ERR_OK, err.msg);
     String summary = supervisor_reload(f.supervisor, test->arena, &next, clock_monotonic_ns());
     test_check_str(test, summary, S("added added · changed changed · removed gone"), "what changed");
     test_check(test, supervisor_count(f.supervisor) == 3, "the new procs, in the new order");

@@ -43,7 +43,7 @@ static const char CONFIG[] = "theme: nord\n"
 
 [[nodiscard]] static Error parse(Test *test, const char *text, Config *config, Err *err)
 {
-    return config_parse(test->arena, S(text), S("/home/me/bprocs.yml"), config, err);
+    return config_parse(test->arena, S(text), S("/home/me/bprocs.yml"), 0, config, err);
 }
 
 static void config_reads_processes_in_order(Test *test)
@@ -125,7 +125,7 @@ static void config_reads_env_files(Test *test)
                     "env: { SHARED: env }\n"
                     "procs:\n"
                     "  web: { run: x, env_file: [web.env], env: { OWN: 1 } }\n");
-    Error parsed = config_parse(a, text, path_join(a, dir, S("bprocs.yml")), &config, &err);
+    Error parsed = config_parse(a, text, path_join(a, dir, S("bprocs.yml")), 0, &config, &err);
     test_check(test, parsed == ERR_OK, err.msg);
     if (parsed == ERR_OK) {
         StringList env = config.procs[0].env;
@@ -135,7 +135,7 @@ static void config_reads_env_files(Test *test)
                    "in the order that lets env: win over a file");
     }
     text = S("env_file: missing.env\nprocs: { web: { run: x } }\n");
-    parsed = config_parse(a, text, path_join(a, dir, S("bprocs.yml")), &config, &err);
+    parsed = config_parse(a, text, path_join(a, dir, S("bprocs.yml")), 0, &config, &err);
     test_check(test, parsed == ERR_PARSE && str_starts_with(S(err.msg), S("line 1: env_file: ")), "a missing file");
     test_check(test, dir_remove_all(dir, &err) == ERR_OK, "clean up");
 }
@@ -154,7 +154,7 @@ static void config_reads_a_procfile_as_foreman_does(Test *test)
                     "\n"
                     "Worker_2:   bundle exec sidekiq\r\n");
     Config config;
-    Error parsed = config_parse(a, text, path_join(a, dir, S("Procfile.dev")), &config, &err);
+    Error parsed = config_parse(a, text, path_join(a, dir, S("Procfile.dev")), 3001, &config, &err);
     test_check(test, parsed == ERR_OK && config.proc_count == 2, err.msg);
     if (parsed == ERR_OK && config.proc_count == 2) {
         const ProcSpec *web = &config.procs[0];
@@ -167,15 +167,20 @@ static void config_reads_a_procfile_as_foreman_does(Test *test)
         test_check_str(test, web->cwd, dir, "in the Procfile's directory");
         test_check(test, web->env.count == 3 && str_equal(web->env.items[1], S("RAILS_ENV=development")),
                    "with the .env beside it");
-        test_check_str(test, web->env.items[web->env.count - 1], S("PORT=3000"), "PORT starts at the .env's PORT");
+        test_check_str(test, web->env.items[web->env.count - 1], S("PORT=3000"),
+                       "PORT starts at the .env's PORT, before the inherited one");
         test_check_str(test, worker->env.items[worker->env.count - 1], S("PORT=3100"), "and goes up by 100");
         test_check(test, web->port == 0, "PORT is not the proc's port");
     }
     test_check(test, dir_remove_all(dir, &err) == ERR_OK, "clean up");
 
-    parsed = config_parse(a, S("web: x\n"), S("/home/me/Procfile"), &config, &err);
+    parsed = config_parse(a, S("web: x\n"), S("/home/me/Procfile"), 0, &config, &err);
     test_check(test, parsed == ERR_OK && str_equal(config.procs[0].env.items[0], S("PORT=5000")),
                "without a .env PORT starts at 5000");
+    parsed = config_parse(a, S("web: x\nworker: y\n"), S("/home/me/Procfile"), 3001, &config, &err);
+    test_check(test, parsed == ERR_OK && str_equal(config.procs[0].env.items[0], S("PORT=3001")) &&
+                         str_equal(config.procs[1].env.items[0], S("PORT=3101")),
+               "without a .env PORT starts at the inherited PORT");
     static const struct {
         const char *text;
         const char *message;
@@ -185,7 +190,7 @@ static void config_reads_a_procfile_as_foreman_does(Test *test)
         { "# nothing yet\n", "no lines such as web: bin/rails server say what to run" },
     };
     for (size_t i = 0; i < countof(CASES); i++) {
-        parsed = config_parse(a, S(CASES[i].text), S("/home/me/Procfile"), &config, &err);
+        parsed = config_parse(a, S(CASES[i].text), S("/home/me/Procfile"), 0, &config, &err);
         test_check(test, parsed == ERR_PARSE, CASES[i].message);
         test_check_str(test, S(err.msg), S(CASES[i].message), "the message");
     }
