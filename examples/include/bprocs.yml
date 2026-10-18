@@ -1,0 +1,32 @@
+# Apps that each have their own Procfile or bprocs.yml, run by one bprocs
+# next to the services they share. An app's procs are named app:proc.
+env: { RAILS_ENV: development }       # every proc, included ones too, gets this first
+
+include_defaults:                      # what every app starts from
+  setup: bin/setup --skip-server       # the job app:setup; the app's procs need it
+  wrap: [mise, exec, --]               # the app's Ruby, for setup and every proc
+
+procs:
+  db:
+    run: postgres -D .data/db
+    port: 5432
+    ready: { port: 5432 }
+  redis:
+    run: redis-server --port 6379
+    port: 6379
+    ready: { port: 6379 }
+
+include:
+  shop:                                # shop/Procfile
+    port: 3001                         # shop:web gets PORT=3001, shop:worker 3101
+    needs: [db, redis]                 # on shop:setup
+    env: { RUBY_DEBUG_OPEN: "true" }
+
+  admin:                               # admin/bprocs.yml, which sets its own ports
+    needs: [db]
+
+  mystore:
+    dir: integrations/mystore          # when the directory isn't the name
+    port: 3003
+    needs: [db]
+    autostart: false                   # stays stopped until bprocs start mystore

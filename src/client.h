@@ -9,6 +9,7 @@ typedef struct Client Client;
 // ClientInfo is what the daemon says about itself in its hello.
 typedef struct ClientInfo {
     String config_path;
+    StringList config_files; // every file the config was read from, config_path first
     String theme;
     size_t scrollback;
     int pid;

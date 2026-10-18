@@ -196,6 +196,131 @@ static void config_reads_a_procfile_as_foreman_does(Test *test)
     }
 }
 
+// write_files writes each path: text pair below dir, making the directories on the way.
+static void write_files(Test *test, String dir, const char *const files[][2], size_t count)
+{
+    Err err = { 0 };
+    for (size_t i = 0; i < count; i++) {
+        String path = path_join(test->arena, dir, S(files[i][0]));
+        bool written = dir_create_all(path_dir(path), 0700, &err) == ERR_OK &&
+                       file_write_all(path, S(files[i][1]), 0600, &err) == ERR_OK;
+        test_check(test, written, files[i][0]);
+    }
+}
+
+static void config_reads_included_apps(Test *test)
+{
+    Arena *a = test->arena;
+    Err err = { 0 };
+    String dir;
+    test_check(test, dir_create_temp(a, S("bprocs-test-"), &dir, &err) == ERR_OK, "a temp dir");
+    static const char *const FILES[][2] = {
+        { "shop/Procfile", "web: bin/rails server\nworker: bundle exec sidekiq\n" },
+        { "shop/.env", "SHARED=dotenv\nPORT=4000\n" },
+        { "apps/admin/bprocs.yml", "env: { OWN: app }\n"
+                                   "procs:\n"
+                                   "  web: { run: x, port: 3002, log: true }\n"
+                                   "  worker: { run: y, needs: [web] }\n" },
+    };
+    write_files(test, dir, FILES, countof(FILES));
+    String text = S("env: { SHARED: top }\n"
+                    "include_defaults: { wrap: [mise, exec, --], env: { FROM: defaults } }\n"
+                    "procs:\n"
+                    "  db: { run: postgres, port: 5432 }\n"
+                    "include:\n"
+                    "  shop:\n"
+                    "    port: 3001\n"
+                    "    needs: [db]\n"
+                    "    setup: bin/setup\n"
+                    "    env: { SHARED: include }\n"
+                    "  admin:\n"
+                    "    dir: apps/admin\n"
+                    "    autostart: false\n");
+    Config config;
+    Error parsed = config_parse(a, text, path_join(a, dir, S("bprocs.yml")), 0, &config, &err);
+    test_check(test, parsed == ERR_OK && config.proc_count == 6, err.msg);
+    if (parsed != ERR_OK || config.proc_count != 6) {
+        return;
+    }
+    const ProcSpec *setup = &config.procs[1];
+    const ProcSpec *web = &config.procs[2];
+    const ProcSpec *worker = &config.procs[3];
+    const ProcSpec *admin_web = &config.procs[4];
+    const ProcSpec *admin_worker = &config.procs[5];
+    test_check_str(test, setup->name, S("shop:setup"), "the setup job comes first, named app:setup");
+    test_check_str(test, admin_worker->name, S("admin:worker"), "then each proc, named app:proc");
+    test_check(test, setup->job && setup->need_count == 1 && setup->needs[0] == 0, "setup is a job that needs db");
+    test_check(test, web->need_count == 1 && web->needs[0] == 1, "the app's procs need its setup");
+    test_check(test, admin_worker->need_count == 1 && admin_worker->needs[0] == 4,
+               "needs inside an app name its own procs");
+    test_check_str(test, web->cwd, path_join(a, dir, S("shop")), "in the app's directory");
+    test_check_str(test, admin_web->cwd, path_join(a, dir, S("apps/admin")), "which dir: sets");
+    test_check(test, setup->argv.count == 6 && str_equal(setup->argv.items[0], S("mise")) &&
+                         str_equal(setup->argv.items[5], S("bin/setup")),
+               "wrap: goes in front of setup:");
+    test_check(test, web->argv.count == 6 && str_equal(web->argv.items[3], S("/bin/sh")), "and of every command");
+    test_check_str(test, web->command, S("bin/rails server"), "which shows as written");
+    static const char *const WEB_ENV[] = { "SHARED=top",  "SHARED=dotenv", "PORT=4000",
+                                           "PORT=3001",   "FROM=defaults", "SHARED=include" };
+    test_check(test, web->env.count == countof(WEB_ENV), "the outer env, .env, PORT, then the include's env");
+    for (size_t i = 0; i < countof(WEB_ENV) && i < web->env.count; i++) {
+        test_check_str(test, web->env.items[i], S(WEB_ENV[i]), "in that order");
+    }
+    test_check_str(test, worker->env.items[3], S("PORT=3101"), "port: is the first proc's PORT");
+    test_check(test, setup->env.count == 5 && str_equal(setup->env.items[2], S("PORT=4000")),
+               "setup gets the env without a PORT of its own");
+    test_check(test, admin_web->env.count == 4 && str_equal(admin_web->env.items[1], S("OWN=app")),
+               "an included bprocs.yml's env comes after the outer one");
+    test_check_str(test, admin_web->log_path, path_join(a, dir, S("apps/admin/log/bprocs/web.log")),
+                   "log_dir is relative to the app");
+    test_check(test, config.procs[0].autostart && web->autostart && !admin_web->autostart && !admin_worker->autostart,
+               "autostart: false stops the whole app");
+    size_t indexes[6];
+    test_check(test, config_select(&config, S("shop"), indexes) == 3 && indexes[0] == 1 && indexes[2] == 3,
+               "an app's name selects its procs");
+    test_check(test, config_select(&config, S("admin:web"), indexes) == 1 && indexes[0] == 4, "a proc's its own");
+    test_check(test, config.files.count == 4 && str_equal(config.files.items[0], path_join(a, dir, S("bprocs.yml"))),
+               "the files it was read from, to watch");
+    test_check(test, dir_remove_all(dir, &err) == ERR_OK, "clean up");
+}
+
+static void config_says_where_an_include_is_wrong(Test *test)
+{
+    Arena *a = test->arena;
+    Err err = { 0 };
+    String dir;
+    test_check(test, dir_create_temp(a, S("bprocs-test-"), &dir, &err) == ERR_OK, "a temp dir");
+    static const char *const FILES[][2] = {
+        { "shop/Procfile", "web: a\nworker: b\n" },
+        { "admin/bprocs.yml", "procs:\n  web: { run: x, port: 3100 }\n" },
+        { "broken/Procfile", "web: a\nnope\n" },
+        { "nested/bprocs.yml", "procs: { web: { run: x } }\ninclude: { shop: {} }\n" },
+    };
+    write_files(test, dir, FILES, countof(FILES));
+    static const struct {
+        const char *text;
+        const char *message;
+    } CASES[] = {
+        { "include:\n  shop:\n    prot: 3001\n", "line 3: include.shop.prot: unknown setting" },
+        { "include:\n  shop: { needs: [db] }\n", "line 2: include.shop.needs: no proc called db" },
+        { "include:\n  gone: {}\n", "line 2: include.gone: no bprocs.yml, bprocs.yaml, Procfile.dev or Procfile in gone" },
+        { "include:\n  broken: {}\n", "broken/Procfile: line 2: expected name: command, such as web: bin/rails server" },
+        { "include:\n  nested: {}\n", "nested/bprocs.yml: line 2: include: only the config that includes this one sets it" },
+        { "include:\n  admin: { port: 3000 }\n", "line 2: include.admin.port: a bprocs.yml sets the ports of its procs itself" },
+        { "include:\n  shop: { port: 3000 }\n  admin: {}\n",
+          "line 3: include.admin: port 3100 of admin:web is also the port of shop:worker" },
+        { "procs:\n  shop: { run: x }\ninclude:\n  shop: {}\n", "line 4: include.shop: there is already a proc called shop" },
+        { "include_defaults: { port: 3000 }\ninclude: { shop: {} }\n", "line 1: include_defaults.port: each app sets its own" },
+    };
+    for (size_t i = 0; i < countof(CASES); i++) {
+        Config config;
+        Error parsed = config_parse(a, S(CASES[i].text), path_join(a, dir, S("bprocs.yml")), 0, &config, &err);
+        test_check(test, parsed == ERR_PARSE, CASES[i].message);
+        test_check_str(test, S(err.msg), S(CASES[i].message), "the message");
+    }
+    test_check(test, dir_remove_all(dir, &err) == ERR_OK, "clean up");
+}
+
 static void config_says_where_it_is_wrong(Test *test)
 {
     static const struct {
@@ -268,6 +393,7 @@ static void config_examples_are_valid(Test *test)
         { "examples/medium/bprocs.yml", 7 },
         { "examples/max/bprocs.yml", 9 },
         { "examples/procfile/Procfile", 3 },
+        { "examples/include/bprocs.yml", 10 },
     };
     for (size_t i = 0; i < countof(EXAMPLES); i++) {
         Config config;
@@ -282,6 +408,8 @@ const TestCase CONFIG_TESTS[] = {
     { "config_reads_processes_in_order", config_reads_processes_in_order },
     { "config_reads_env_files", config_reads_env_files },
     { "config_reads_a_procfile_as_foreman_does", config_reads_a_procfile_as_foreman_does },
+    { "config_reads_included_apps", config_reads_included_apps },
+    { "config_says_where_an_include_is_wrong", config_says_where_an_include_is_wrong },
     { "config_says_where_it_is_wrong", config_says_where_it_is_wrong },
     { "config_is_found_above_the_working_directory", config_is_found_above_the_working_directory },
     { "config_examples_are_valid", config_examples_are_valid },

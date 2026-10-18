@@ -116,6 +116,10 @@ Error client_ensure_daemon(Arena *scratch, String config_path, bool *started, Er
         .scrollback = (size_t)node_get_int(reply, S("scrollback"), DEFAULT_SCROLLBACK),
         .pid = (int)node_get_int(reply, S("pid"), 0),
     };
+    const Node *files = node_get(reply, S("files"));
+    for (size_t i = 0; files != nullptr && i < files->count; i++) {
+        strlist_push(arena, &client->info.config_files, files->items[i]->text);
+    }
     client->info.specs = specs_from_node(arena, node_get(reply, S("procs")), &client->info.count);
     return ERR_OK;
 }

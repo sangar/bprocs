@@ -56,6 +56,7 @@ typedef struct ProcSpec {
 typedef struct Config {
     String path; // absolute
     String directory;
+    StringList files; // every file it was read from, path first, so an edit to any of them is noticed
     String theme; // empty for the default
     size_t scrollback;
     ProcSpec *procs;
@@ -71,7 +72,8 @@ enum { DEFAULT_SCROLLBACK = 10000 };
 // there is none: a Procfile's ports start from it when its .env sets no PORT.
 // A config that does not say what to run, or says it in a way bprocs does not
 // know, is ERR_PARSE with the line in err. The env_file: files it names are
-// read.
+// read, and so is each app of include:, whose procs follow the config's own,
+// named app:proc.
 [[nodiscard]] Error config_parse(Arena *arena, String text, String path, int inherited_port, Config *config,
                                  Err *err);
 // config_load reads the config at path with the PORT of this process's environment.
@@ -86,3 +88,6 @@ bool config_find(Arena *arena, String directory, String *path);
 bool config_spec_runs_same(const ProcSpec *a, const ProcSpec *b);
 // config_proc_index finds the proc called name.
 bool config_proc_index(const Config *config, String name, size_t *index);
+// config_select writes to indexes, which has room for every proc, the proc
+// called name, or every proc of the app called name, and returns how many.
+size_t config_select(const Config *config, String name, size_t *indexes);

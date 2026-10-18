@@ -51,6 +51,8 @@ static const char USAGE[] =
     "  reload                  read the config again; restart only the procs that changed\n"
     "  ls                      every running daemon on this machine\n"
     "\n"
+    "A NAME can also be an app of include:, for every proc of it.\n"
+    "\n"
     "options, before the command:\n"
     "  -C DIR         look for the config from DIR\n"
     "  -f FILE        use this config\n"

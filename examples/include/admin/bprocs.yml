@@ -1,0 +1,11 @@
+# An app with checks or restarts of its own has a bprocs.yml, read instead of
+# its Procfile. Its needs name its own procs.
+procs:
+  web:
+    run: bin/rails server -p 3002
+    port: 3002
+    ready: { http: /up }
+    restart: on-failure
+  worker:
+    run: bundle exec sidekiq
+    needs: [web]                       # admin:web

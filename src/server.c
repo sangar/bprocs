@@ -301,13 +301,14 @@ static void close_connection(Server *server, Connection *connection)
 
 // ---- requests ----
 
-// resolve turns the names of a request into proc indexes; no names is every proc when all is set.
+// resolve turns the names of a request, of procs or of apps, into proc
+// indexes; no names is every proc when all is set.
 static bool resolve(Server *server, const Node *request, bool all, size_t **procs, size_t *count, String *error)
 {
     const Node *names = node_get(request, S("names"));
     size_t total = supervisor_count(server->supervisor);
     size_t wanted = names != nullptr && names->kind == NODE_SEQUENCE ? names->count : 0;
-    *procs = arena_push(server->frame, arena_size_mul(wanted > 0 ? wanted : total, sizeof **procs));
+    *procs = arena_push(server->frame, arena_size_mul(arena_size_mul(wanted > 0 ? wanted : 1, total), sizeof **procs));
     *count = 0;
     if (wanted == 0) {
         if (!all) {
@@ -320,13 +321,29 @@ static bool resolve(Server *server, const Node *request, bool all, size_t **proc
         return true;
     }
     for (size_t i = 0; i < wanted; i++) {
-        size_t index;
         String name = names->items[i]->text;
-        if (!config_proc_index(server->config, name, &index)) {
+        size_t found = config_select(server->config, name, *procs + *count);
+        if (found == 0) {
             *error = str_format(server->frame, "no proc called %.*s", (int)name.len, name.data);
             return false;
         }
-        (*procs)[(*count)++] = index;
+        *count += found;
+    }
+    return true;
+}
+
+// resolve_one finds the one proc a request names, by its own name and not its app's.
+static bool resolve_one(Server *server, const Node *request, size_t *proc, String *error)
+{
+    const Node *names = node_get(request, S("names"));
+    if (names == nullptr || names->kind != NODE_SEQUENCE || names->count == 0) {
+        *error = S("name a proc");
+        return false;
+    }
+    String name = names->items[0]->text;
+    if (!config_proc_index(server->config, name, proc)) {
+        *error = str_format(server->frame, "no proc called %.*s", (int)name.len, name.data);
+        return false;
     }
     return true;
 }
@@ -346,6 +363,11 @@ static void handle_hello(Server *server, Connection *connection, int64_t id, con
     message_int(a, reply, "version", PROTOCOL_VERSION);
     message_int(a, reply, "pid", process_id());
     message_text(a, reply, "config", server->config->path);
+    Node *files = message_list(a);
+    for (size_t i = 0; i < server->config->files.count; i++) {
+        message_append_text(a, files, server->config->files.items[i]);
+    }
+    message_put(a, reply, "files", files);
     message_text(a, reply, "theme", server->config->theme);
     message_int(a, reply, "scrollback", (int64_t)server->config->scrollback);
     Node *procs = message_list(a);
@@ -442,14 +464,13 @@ static String log_text(Arena *arena, const LogBuffer *log, int64_t lines, bool p
 
 static void handle_logs(Server *server, Connection *connection, int64_t id, const Node *request)
 {
-    size_t *procs;
-    size_t count;
+    size_t index;
     String error;
-    if (!resolve(server, request, false, &procs, &count, &error)) {
+    if (!resolve_one(server, request, &index, &error)) {
         reply_error(server, connection, id, error);
         return;
     }
-    Proc *proc = supervisor_proc(server->supervisor, procs[0]);
+    Proc *proc = supervisor_proc(server->supervisor, index);
     proc_lock(proc);
     String text = log_text(server->frame, proc_log(proc), node_get_int(request, S("lines"), -1), true);
     proc_unlock(proc);
@@ -498,14 +519,13 @@ static void handle_subscribe(Server *server, Connection *connection, int64_t id,
 
 static void handle_input(Server *server, Connection *connection, int64_t id, const Node *request, String body)
 {
-    size_t *procs;
-    size_t count;
+    size_t index;
     String error;
-    if (!resolve(server, request, false, &procs, &count, &error)) {
+    if (!resolve_one(server, request, &index, &error)) {
         reply_error(server, connection, id, error);
         return;
     }
-    proc_send(supervisor_proc(server->supervisor, procs[0]), body);
+    proc_send(supervisor_proc(server->supervisor, index), body);
     if (node_get_bool(request, S("reply"), true)) {
         reply_ok(server, connection, id);
     }
@@ -534,16 +554,15 @@ static void handle_resize(Server *server, Connection *connection, int64_t id, co
 
 static void handle_clear(Server *server, Connection *connection, int64_t id, const Node *request)
 {
-    size_t *procs;
-    size_t count;
+    size_t index;
     String error;
-    if (!resolve(server, request, false, &procs, &count, &error)) {
+    if (!resolve_one(server, request, &index, &error)) {
         reply_error(server, connection, id, error);
         return;
     }
-    proc_clear_log(supervisor_proc(server->supervisor, procs[0]));
+    proc_clear_log(supervisor_proc(server->supervisor, index));
     Node *event = message(server->frame, "cleared");
-    message_int(server->frame, event, "proc", (int64_t)procs[0]);
+    message_int(server->frame, event, "proc", (int64_t)index);
     broadcast(server, event, S(""));
     reply_ok(server, connection, id);
 }

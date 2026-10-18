@@ -47,6 +47,8 @@ The config is found in the current directory or the nearest one above it: `bproc
 | `bprocs ls` | every running daemon on this machine |
 | `bprocs run [NAME…] [--wait NAME] [--exit-on-failure] [--ready-timeout D] [--plain]` | run in the foreground, without a daemon, for CI |
 
+A `NAME` for `up`, `start`, `stop`, `restart`, `kill`, `wait` and `run` can also be an app of [`include:`](#apps-with-their-own-config), for every proc of it.
+
 Options before the command: `-C DIR` looks for the config from `DIR`, `-f FILE` uses that config, and `--theme NAME`, `--256` and `--truecolor` set how the TUI looks. Durations are written as `500ms`, `30s` or `2m`.
 
 The exit status is 0 on success, 1 when a proc failed or a wait timed out, 2 for a usage or config error, and 3 when a command needs a daemon and none runs. `bprocs down` with nothing running is 0.
@@ -155,7 +157,7 @@ procs:
 | `log` | `true` for `log_dir/NAME.log`, or a path; files are appended to and moved to `.1` at 10 MB |
 | `color` | the colour of the name |
 
-`examples/` has the configs that the tests load: `minimal`, a typical web app in `medium`, `max`, which uses every setting, and a Procfile in `procfile`.
+`examples/` has the configs that the tests load: `minimal`, a typical web app in `medium`, `max`, which uses every setting, a Procfile in `procfile`, and apps with their own config in `include`.
 
 An unknown setting is an error with its line, so a typo does not go unnoticed, and so are a name in `needs` that is not a proc, needs that go round in a loop, and two procs with the same port. Programs see `TERM=xterm-256color` and `COLORTERM=truecolor`.
 
@@ -167,6 +169,45 @@ A `Procfile`, `Procfile.dev` or any other `Procfile.*` is read as foreman reads 
 - A `.env` beside the Procfile is read when there is one.
 - `PORT` is 5000 for the first proc, 5100 for the next and so on, or starts at the `.env`'s `PORT`, else at the `PORT` bprocs runs with. That is the daemon's, from when it started: a `bprocs reload` does not see a `PORT` changed since. It is not the proc's `port`: bprocs cannot tell whether the program listens on it, so the list shows no port, and a port in use does not stop the proc from starting.
 - Every proc gets the defaults above, so it starts with the others, does not restart, and has no checks. For needs, checks, restarts or log files, write a `bprocs.yml`.
+
+### Apps with their own config
+
+`include:` runs apps that each have their own `Procfile` or `bprocs.yml` in one daemon and one list, beside the services they share:
+
+```yaml
+env: { RAILS_ENV: development }       # every proc, included ones too, gets this first
+
+include_defaults:                      # what every app starts from, optional
+  setup: bin/setup --skip-server
+  wrap: [mise, exec, --]
+
+procs:
+  db:
+    run: postgres -D .data/db
+    port: 5432
+    ready: { port: 5432 }
+
+include:
+  shop:
+    dir: shop                          # where its bprocs.yml or Procfile is; default: the name
+    port: 3001                         # its Procfile's first PORT
+    needs: [db]                        # top-level procs the app needs, optional
+    setup: bin/setup --skip-server     # the job shop:setup, which the app's procs need, optional
+    env: { RUBY_DEBUG_OPEN: "true" }   # added to every proc of the app, optional
+    wrap: [mise, exec, --]             # in front of every command of the app, optional
+    autostart: false                   # leaves every proc of the app stopped, optional
+```
+
+- An app's procs are named `shop:web`, `shop:worker` and so on, and run in its directory. `bprocs start shop`, and `stop`, `restart` and the others, act on all of them.
+- An app's `bprocs.yml` is read instead of its `Procfile`. It is read as any `bprocs.yml`, with paths and `log_dir` relative to the app; its `needs` name its own procs. It takes no `theme`, `scrollback` or `include`, and its include takes no `port:`, as its procs set their own.
+- The environment of an app's proc is, later entries winning: the top-level `env_file:` and `env:`, the app's `.env`, for a `bprocs.yml` its own `env_file:` and `env:`, then the proc's `PORT` and its own, then the include's `env:`.
+- A `Procfile`'s `PORT`s start at the include's `port:`, else at the `.env`'s `PORT`, else at 5000, and not at the `PORT` bprocs runs with, which every app would share. They are checked against every port of the other apps and the top-level procs: `shop` at 3000 gives its second proc 3100, which another app cannot have.
+- `needs:` goes on the setup job when there is one, else on every proc of the app.
+- `wrap:` does not wrap `cmd:` checks, and the list shows each command as written.
+- An app's setting replaces the one in `include_defaults:`, but its `env:` adds to it.
+- `bprocs reload` reads every app's config again, and the TUI notices an edit to any of them or to an `.env`.
+
+Run bprocs from the directory of this config, or with `-C ..` from an app's: inside `shop`, bprocs finds `shop`'s own config first and starts a second daemon, whose ports collide with the first's.
 
 ## Profile
 

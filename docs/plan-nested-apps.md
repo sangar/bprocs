@@ -70,6 +70,9 @@ the outer tabs, and makes `bprocs down` stop everything.
 
 ## Phase 2: `include:`, which replaces the nested daemons
 
+Status: done in bprocs, with `include_defaults:` for repeated settings (see
+the open questions). The switch in `make-app/bprocs.yml` is still to do.
+
 One daemon, one list, every app's processes in it.
 
 ```yaml
@@ -211,23 +214,30 @@ then the rest of it.
 
 ### Open questions
 
-- **Repeated settings.** With a dozen apps, `wrap:` and `setup:` repeat in every
-  entry. YAML merge keys (`<<: *rails_app`) would cover it if libmc's YAML
-  parser supports them, which is not checked yet. Otherwise add a top-level
-  `include_defaults:`. Decide before writing the parser.
+- **Decided: repeated settings.** libmc's YAML parser has anchors and aliases
+  but no merge keys, so `<<: *rails_app` reads as an unknown setting. A
+  top-level `include_defaults:` takes every include setting but `dir:` and
+  `port:`; an app's setting replaces the default, and its `env:` adds to it.
 - **`needs:` without `setup:`.** It then goes on every proc in the app, so all of
   them react when `db` restarts, not only a setup job.
 
 ### Code
 
-Where the code goes: `src/config.c` (parse, then merge the app's procs into
-`config->procs` with the prefix) and `src/config.h`. The daemon and supervisor
-need no change if the merged specs look like normal ones. When merging:
-- Offset each app's `needs` indexes by where its procs start in `config->procs`.
-- `check_cycles` and `check_ports` find the YAML node of a proc by its index
-  (`procs->entries[i]`, `src/config.c:607` and `:622`). After the merge that
-  index no longer matches, so keep each proc's node and file beside its spec for
-  errors.
+As built: `src/config.c` reads each app as a config of its own, then merges
+its procs into `config->procs` with the prefix (`read_includes`, `add_app`).
+The daemon and supervisor need no change, since the merged specs look like
+normal ones.
+- Each app's `needs` indexes move by where its procs start in `config->procs`.
+- `check_cycles` and `check_ports` run on each file before the merge, so
+  they keep finding a proc's node by its index. No loop can cross files: an
+  include's `needs:` names top-level procs only, and a top-level proc cannot
+  need an app's. Ports across apps are checked while merging, against the
+  include entry.
+- `config_select` turns a proc or app name into indexes, for `resolve` in
+  `src/server.c` and `bprocs run NAME`. `logs`, `attach`, input and `clear`
+  take one proc and still need its full name.
+- `Config.files` lists every file read, the `.env` and `env_file:` files
+  included; the daemon sends it in its hello, and the TUI watches all of it.
 
 ## Phase 3: TUI grouping
 
@@ -253,7 +263,8 @@ need no change if the merged specs look like normal ones. When merging:
 ## Order and size
 
 Phase 1 is done in bprocs; what is left of it is the switch to `bprocs run` in
-`make-app/bprocs.yml`. Phase 2 is the main change. Phase 3 follows soon
+`make-app/bprocs.yml`. Phase 2 is done in bprocs too, so that switch can go
+straight to `include:`. Phase 3 follows soon
 after: with a dozen apps in one list there are 30 to 50 rows, too many to use
 without groups. After Phase 2, `make-app/bprocs.yml` becomes one `include:` per
 app, and `bin/start.sh` stays `bprocs`.

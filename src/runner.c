@@ -102,14 +102,17 @@ static bool start_targets(Runner *runner, size_t wait_index, bool waits)
     if (runner->options.names.count == 0) {
         supervisor_up(runner->supervisor, now);
     }
+    size_t *indexes = arena_push(runner->scratch, arena_size_mul(runner->config->proc_count, sizeof *indexes));
     for (size_t i = 0; i < runner->options.names.count; i++) {
-        size_t index;
         String name = runner->options.names.items[i];
-        if (!config_proc_index(runner->config, name, &index)) {
+        size_t found = config_select(runner->config, name, indexes);
+        if (found == 0) {
             fprintf(stderr, "bprocs: no proc called %.*s\n", (int)name.len, name.data);
             return false;
         }
-        supervisor_start(runner->supervisor, index, now);
+        for (size_t j = 0; j < found; j++) {
+            supervisor_start(runner->supervisor, indexes[j], now);
+        }
     }
     if (waits) {
         supervisor_start(runner->supervisor, wait_index, now);

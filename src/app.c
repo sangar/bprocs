@@ -57,6 +57,7 @@ static void destroy_views(App *app)
         logbuf_destroy(app->views[i].log);
     }
     arena_reset(app->views_arena);
+    app->config_files = (StringList) { 0 };
     app->views = nullptr;
     app->view_count = 0;
 }
@@ -67,6 +68,10 @@ static void build_views(App *app)
     destroy_views(app);
     const ClientInfo *info = client_info(app->client);
     app->config_path = str_copy(app->arena, info->config_path);
+    app->config_files = strlist_copy(app->views_arena, info->config_files);
+    for (size_t i = 0; i < app->config_files.count; i++) {
+        app->config_files.items[i] = str_copy(app->views_arena, app->config_files.items[i]);
+    }
     app->view_count = info->count;
     app->views = arena_push(app->views_arena, arena_size_mul(info->count, sizeof(ProcView)));
     for (size_t i = 0; i < info->count; i++) {
@@ -635,19 +640,32 @@ static void open_port(App *app)
 
 // ---- noticing an edited config ----
 
-static int64_t config_mtime(App *app)
+// config_mtime is when the file of the config that changed last did, and which file that is.
+static int64_t config_mtime(App *app, String *latest)
 {
-    FileInfo info = { 0 };
-    return file_info_follow(app->config_path, &info, nullptr) == ERR_OK ? info.mtime_ns : 0;
+    int64_t mtime = 0;
+    for (size_t i = 0; i < app->config_files.count; i++) {
+        FileInfo info = { 0 };
+        if (file_info_follow(app->config_files.items[i], &info, nullptr) == ERR_OK && info.mtime_ns > mtime) {
+            mtime = info.mtime_ns;
+            *latest = app->config_files.items[i];
+        }
+    }
+    return mtime;
 }
 
-// notice_config_change says so when the config has changed since it was last looked at.
+// notice_config_change says so when a file of the config, an included one or
+// an env file, has changed since they were last looked at.
 static void notice_config_change(App *app)
 {
-    int64_t mtime = config_mtime(app);
+    String latest = app->config_path;
+    int64_t mtime = config_mtime(app, &latest);
     if (mtime != 0 && app->config_mtime_ns != 0 && mtime != app->config_mtime_ns) {
-        String base = path_base(app->config_path);
-        toast(app, "%.*s changed · R reloads it", (int)base.len, base.data);
+        String shown;
+        if (!path_relative(path_dir(app->config_path), latest, &shown)) {
+            shown = path_base(latest);
+        }
+        toast(app, "%.*s changed · R reloads it", (int)shown.len, shown.data);
     }
     app->config_mtime_ns = mtime;
 }
@@ -723,7 +741,8 @@ static void switch_project(App *app)
         return;
     }
     send_size(app);
-    app->config_mtime_ns = config_mtime(app);
+    String latest;
+    app->config_mtime_ns = config_mtime(app, &latest);
     toast(app, "⇄ %.*s", (int)app->config_path.len, app->config_path.data);
 }
 

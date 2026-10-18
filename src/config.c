@@ -17,18 +17,26 @@ enum {
     PROCFILE_PORT_STEP = 100,
 };
 
-// Reader is what reading one config needs at every level.
+// Reader is what reading one config needs at every level. An app of
+// include: is read with a reader of its own.
 typedef struct Reader {
     Arena *arena;
-    String directory;
-    StringList env; // the top level's env_file: and env:, which every proc starts from
+    String root;      // the directory of the config bprocs was started with, which errors show paths from
+    String directory; // the directory of the config being read
+    StringList env;   // what every proc starts from: the top level's env_file: and env:, after an app's .env
     String log_dir;
-    int inherited_port; // the PORT bprocs runs with, 0 when there is none
+    int first_port;    // a Procfile's first PORT
+    bool included;     // an app of include:, which leaves theme:, scrollback: and include: to the config above
+    StringList *files; // every file read, for Config.files
     Err *err;
 } Reader;
 
 [[nodiscard]] static Error invalid(Err *err, const Node *node, String where, const char *problem)
 {
+    // The YAML parser gives an empty value, such as an app of include: with no settings, no line.
+    if (node->line == 0) {
+        return err_set(err, ERR_PARSE, "%.*s: %s", (int)where.len, where.data, problem);
+    }
     return err_set(err, ERR_PARSE, "line %zu: %.*s: %s", node->line, (int)where.len, where.data, problem);
 }
 
@@ -40,6 +48,13 @@ static String setting(Arena *arena, String where, String key)
 static String relative_to(Arena *arena, String directory, String path)
 {
     return path_is_absolute(path) ? path_clean(arena, path) : path_clean(arena, path_join(arena, directory, path));
+}
+
+// shown is how errors show path: below the root, relative to it.
+static String shown(const Reader *reader, String path)
+{
+    String relative;
+    return path_relative(reader->root, path, &relative) ? relative : path;
 }
 
 static bool is_scalar(const Node *node)
@@ -178,6 +193,7 @@ static String command_text(Arena *arena, StringList argv, bool script)
     if (e != ERR_OK) {
         return err_wrap(reader->err, ERR_PARSE, "line %zu: %.*s", path_node->line, (int)where.len, where.data);
     }
+    strlist_push(reader->arena, reader->files, absolute);
     return ERR_OK;
 }
 
@@ -370,6 +386,12 @@ static int port_number(String text)
     return str_parse_u64(text, &number) && number > 0 && number < 65536 ? (int)number : 0;
 }
 
+// either is port, or fallback when port is 0.
+static int either(int port, int fallback)
+{
+    return port > 0 ? port : fallback;
+}
+
 // port_from_env is the value of the last PORT among the env entries, 0 when there is none.
 static int port_from_env(StringList env)
 {
@@ -542,13 +564,13 @@ static ProcSpec default_spec(String name, String directory)
     return finish_proc(reader, node, where, &env, spec);
 }
 
-[[nodiscard]] static Error read_needs(Reader *reader, const Node *node, String where, Config *config, ProcSpec *spec)
+// read_needs turns a list of names into indexes into config's procs; self is
+// the name of what needs them.
+[[nodiscard]] static Error read_needs(Reader *reader, const Node *needs, String where, const Config *config,
+                                      String self, size_t **indexes, size_t *count)
 {
-    const Node *needs = node_get(node, S("needs"));
-    if (needs == nullptr) {
-        return ERR_OK;
-    }
-    spec->needs = arena_push(reader->arena, arena_size_mul(needs->count, sizeof *spec->needs));
+    *indexes = arena_push(reader->arena, arena_size_mul(needs->count, sizeof **indexes));
+    *count = 0;
     for (size_t i = 0; i < needs->count; i++) {
         const Node *item = needs->items[i];
         size_t index;
@@ -557,10 +579,10 @@ static ProcSpec default_spec(String name, String directory)
                            str_cstr(reader->arena, str_format(reader->arena, "no proc called %.*s",
                                                               (int)item->text.len, item->text.data)));
         }
-        if (str_equal(item->text, spec->name)) {
+        if (str_equal(item->text, self)) {
             return invalid(reader->err, item, where, "a proc cannot need itself");
         }
-        spec->needs[spec->need_count++] = index;
+        (*indexes)[(*count)++] = index;
     }
     return ERR_OK;
 }
@@ -649,7 +671,10 @@ static bool find_cycle(const Config *config, size_t proc, Visit *visits, size_t 
     for (size_t i = 0; i < config->proc_count; i++) {
         ProcSpec *spec = &config->procs[i];
         String where = setting(reader->arena, setting(reader->arena, S("procs"), spec->name), S("needs"));
-        Error e = read_needs(reader, procs->entries[i].value, where, config, spec);
+        const Node *needs = node_get(procs->entries[i].value, S("needs"));
+        Error e = needs == nullptr
+                      ? ERR_OK
+                      : read_needs(reader, needs, where, config, spec->name, &spec->needs, &spec->need_count);
         if (e != ERR_OK) {
             return e;
         }
@@ -658,8 +683,22 @@ static bool find_cycle(const Config *config, size_t proc, Visit *visits, size_t 
     return e == ERR_OK ? check_ports(reader, procs, config) : e;
 }
 
-// read_top reads every top-level setting but procs:, which needs them first.
-[[nodiscard]] static Error read_top(Reader *reader, const Node *root, Config *config, const Node **procs)
+// Sections is what read_top leaves for later: procs: needs the other
+// settings first, and include: the procs.
+typedef struct Sections {
+    const Node *procs;
+    const Node *include;
+    const Node *include_defaults;
+} Sections;
+
+static bool is_top_only(String key)
+{
+    return str_equal(key, S("theme")) || str_equal(key, S("scrollback")) || str_equal(key, S("include")) ||
+           str_equal(key, S("include_defaults"));
+}
+
+// read_top reads every top-level setting but the sections.
+[[nodiscard]] static Error read_top(Reader *reader, const Node *root, Config *config, Sections *sections)
 {
     String log_dir = S("log/bprocs");
     StringList from_files = { 0 };
@@ -668,8 +707,14 @@ static bool find_cycle(const Config *config, size_t proc, Visit *visits, size_t 
         String key = root->entries[i].key;
         const Node *value = root->entries[i].value;
         Error e = ERR_OK;
-        if (str_equal(key, S("procs"))) {
-            *procs = value;
+        if (reader->included && is_top_only(key)) {
+            e = invalid(reader->err, value, key, "only the config that includes this one sets it");
+        } else if (str_equal(key, S("procs"))) {
+            sections->procs = value;
+        } else if (str_equal(key, S("include"))) {
+            sections->include = value;
+        } else if (str_equal(key, S("include_defaults"))) {
+            sections->include_defaults = value;
         } else if (str_equal(key, S("theme"))) {
             e = read_string(value, key, &config->theme, reader->err);
         } else if (str_equal(key, S("scrollback"))) {
@@ -720,24 +765,22 @@ static bool is_procfile_name(String name)
     if (e == ERR_OK) {
         e = dotenv_parse(reader->arena, text, env, reader->err);
     }
-    return e == ERR_OK ? ERR_OK : err_wrap(reader->err, ERR_PARSE, ".env");
+    if (e != ERR_OK) {
+        String at = shown(reader, path);
+        return err_wrap(reader->err, ERR_PARSE, "%.*s", (int)at.len, at.data);
+    }
+    strlist_push(reader->arena, reader->files, path);
+    return ERR_OK;
 }
 
 // read_procfile reads a Procfile as foreman does: name: command lines run in
-// sh -c, with the .env beside it and PORT in steps of 100 from the .env's
-// PORT, else the inherited PORT, else 5000. That PORT is not the proc's port,
-// as bprocs cannot tell whether the program listens on it.
+// sh -c, each with the reader's env and PORT in steps of 100 from its
+// first_port. That PORT is not the proc's port, as bprocs cannot tell whether
+// the program listens on it.
 [[nodiscard]] static Error read_procfile(Reader *reader, String text, Config *config)
 {
     Arena *arena = reader->arena;
-    StringList dotenv = { 0 };
-    Error e = read_dotenv(reader, &dotenv);
-    if (e != ERR_OK) {
-        return e;
-    }
-    int port = port_from_env(dotenv);
-    port = port > 0 ? port : reader->inherited_port;
-    port = port > 0 ? port : PROCFILE_FIRST_PORT;
+    int port = reader->first_port;
     StringList lines = str_split(arena, text, '\n');
     config->procs = arena_push(arena, arena_size_mul(lines.count, sizeof(ProcSpec)));
     for (size_t i = 0; i < lines.count; i++) {
@@ -760,7 +803,7 @@ static bool is_procfile_name(String name)
         *spec = default_spec(name, reader->directory);
         spec->command = str_trim(command);
         spec->argv = shell_argv(arena, spec->command);
-        spec->env = strlist_copy(arena, dotenv);
+        spec->env = strlist_copy(arena, reader->env);
         strlist_push(arena, &spec->env, str_format(arena, "PORT=%d", port));
         port += PROCFILE_PORT_STEP;
     }
@@ -776,35 +819,351 @@ static bool is_procfile(String path)
     return str_equal(base, S("Procfile")) || str_starts_with(base, S("Procfile."));
 }
 
-Error config_parse(Arena *arena, String text, String path, int inherited_port, Config *config, Err *err)
+// read_yaml reads a bprocs.yml into config, all but its include:, which it leaves in sections.
+[[nodiscard]] static Error read_yaml(Reader *reader, String text, Config *config, Sections *sections)
 {
-    *config = (Config) { .path = path, .directory = path_dir(path), .scrollback = DEFAULT_SCROLLBACK };
-    Reader reader = {
-        .arena = arena,
-        .directory = config->directory,
-        .inherited_port = inherited_port,
-        .err = err,
-    };
-    if (is_procfile(path)) {
-        return read_procfile(&reader, text, config);
-    }
     Node *root;
-    Error parsed = yaml_parse(arena, text, &root, err);
+    Error parsed = yaml_parse(reader->arena, text, &root, reader->err);
     if (parsed != ERR_OK) {
         return parsed;
     }
     if (root->kind != NODE_MAPPING) {
-        return err_set(err, ERR_PARSE, "expected settings with a procs: section");
+        return err_set(reader->err, ERR_PARSE, "expected settings with a procs: section");
     }
-    const Node *procs = nullptr;
-    Error e = read_top(&reader, root, config, &procs);
+    Error e = read_top(reader, root, config, sections);
     if (e != ERR_OK) {
         return e;
     }
-    if (procs == nullptr) {
-        return err_set(err, ERR_PARSE, "no procs: section says what to run");
+    if (sections->procs == nullptr && sections->include == nullptr) {
+        return err_set(reader->err, ERR_PARSE, "no procs: section says what to run");
     }
-    return read_procs(&reader, procs, config);
+    return sections->procs == nullptr ? ERR_OK : read_procs(reader, sections->procs, config);
+}
+
+// Include is an app of include:, or the include_defaults: every app starts from.
+typedef struct Include {
+    String name;
+    String directory; // absolute
+    const Node *node; // its settings, for errors
+    int port;         // its Procfile's first PORT; 0 when not set
+    size_t *needs;    // indexes of top-level procs
+    size_t need_count;
+    StringList setup; // the argv of its setup job; empty when there is none
+    String setup_command;
+    StringList env;
+    StringList wrap;
+    bool autostart;
+} Include;
+
+// Included is an app once its config has been read.
+typedef struct Included {
+    Include include;
+    Config config;
+    StringList env; // what its setup job starts from, as its procs did
+    bool procfile;
+} Included;
+
+// include_node is the node of an include's setting, or the include's when
+// the setting came from include_defaults:, for errors.
+static const Node *include_node(const Include *include, String key)
+{
+    const Node *node = node_get(include->node, key);
+    return node != nullptr ? node : include->node;
+}
+
+[[nodiscard]] static Error read_include_key(Reader *reader, const Config *top, Include *include, String key,
+                                            const Node *value, String where, bool defaults)
+{
+    Arena *arena = reader->arena;
+    Err *err = reader->err;
+    if (defaults && (str_equal(key, S("dir")) || str_equal(key, S("port")))) {
+        return invalid(err, value, where, "each app sets its own");
+    }
+    if (str_equal(key, S("dir"))) {
+        String dir;
+        Error e = read_string(value, where, &dir, err);
+        include->directory = e == ERR_OK ? relative_to(arena, reader->directory, dir) : include->directory;
+        return e;
+    }
+    if (str_equal(key, S("port"))) {
+        return read_port(value, where, &include->port, err);
+    }
+    if (str_equal(key, S("needs"))) {
+        return value->kind == NODE_SEQUENCE
+                   ? read_needs(reader, value, where, top, include->name, &include->needs, &include->need_count)
+                   : invalid(err, value, where, "expected a list of proc names");
+    }
+    if (str_equal(key, S("setup"))) {
+        Error e = read_command(arena, value, where, &include->setup, err);
+        include->setup_command = e == ERR_OK ? command_text(arena, include->setup, value->kind != NODE_SEQUENCE) : S("");
+        return e;
+    }
+    if (str_equal(key, S("env"))) {
+        return read_env(arena, value, where, &include->env, err);
+    }
+    if (str_equal(key, S("wrap"))) {
+        include->wrap = (StringList) { 0 };
+        return read_argv(arena, value, where, &include->wrap, err);
+    }
+    if (str_equal(key, S("autostart"))) {
+        return read_bool(value, where, &include->autostart, err);
+    }
+    return invalid(err, value, where, "unknown setting");
+}
+
+// read_include reads the settings of an app, or of include_defaults:, over
+// what include holds. Its needs: name procs of top.
+[[nodiscard]] static Error read_include(Reader *reader, const Config *top, const Node *node, String where, bool defaults,
+                                        Include *include)
+{
+    if (node->kind == NODE_NULL) {
+        return ERR_OK;
+    }
+    if (node->kind != NODE_MAPPING) {
+        return invalid(reader->err, node, where, "expected settings such as port: or setup:");
+    }
+    for (size_t i = 0; i < node->entry_count; i++) {
+        String key = node->entries[i].key;
+        Error e = read_include_key(reader, top, include, key, node->entries[i].value,
+                                   setting(reader->arena, where, key), defaults);
+        if (e != ERR_OK) {
+            return e;
+        }
+    }
+    return ERR_OK;
+}
+
+// find_app_config looks for a config in directory alone, in config_find's order.
+static bool find_app_config(Arena *arena, String directory, String *path)
+{
+    for (size_t i = 0; i < countof(CONFIG_NAMES); i++) {
+        *path = path_join(arena, directory, S(CONFIG_NAMES[i]));
+        if (file_exists(*path)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// read_app reads the config in an app's directory as a config of its own.
+// Its procs start from the env of the config above, then the app's .env.
+[[nodiscard]] static Error read_app(Reader *outer, Included *app)
+{
+    Arena *arena = outer->arena;
+    Err *err = outer->err;
+    const Include *include = &app->include;
+    String where = setting(arena, S("include"), include->name);
+    String path;
+    if (!find_app_config(arena, include->directory, &path)) {
+        String dir = shown(outer, include->directory);
+        return invalid(err, include->node, where,
+                       str_cstr(arena, str_format(arena, "no bprocs.yml, bprocs.yaml, Procfile.dev or Procfile in %.*s",
+                                                  (int)dir.len, dir.data)));
+    }
+    app->procfile = is_procfile(path);
+    if (include->port > 0 && !app->procfile) {
+        return invalid(err, include_node(include, S("port")), setting(arena, where, S("port")),
+                       "a bprocs.yml sets the ports of its procs itself");
+    }
+    app->config = (Config) { .path = path, .directory = include->directory, .scrollback = DEFAULT_SCROLLBACK };
+    Reader reader = {
+        .arena = arena,
+        .root = outer->root,
+        .directory = include->directory,
+        .env = strlist_copy(arena, outer->env),
+        .included = true,
+        .files = outer->files,
+        .err = err,
+    };
+    String text;
+    Error e = file_read_all(arena, path, &text, err);
+    if (e != ERR_OK) {
+        return e;
+    }
+    strlist_push(arena, outer->files, path);
+    StringList dotenv = { 0 };
+    e = read_dotenv(&reader, &dotenv);
+    if (e != ERR_OK) {
+        return e;
+    }
+    strlist_push_all(arena, &reader.env, dotenv);
+    reader.first_port = either(include->port, either(port_from_env(dotenv), PROCFILE_FIRST_PORT));
+    Sections sections = { 0 };
+    e = app->procfile ? read_procfile(&reader, text, &app->config) : read_yaml(&reader, text, &app->config, &sections);
+    if (e != ERR_OK) {
+        String at = shown(outer, path);
+        return err_wrap(err, ERR_PARSE, "%.*s", (int)at.len, at.data);
+    }
+    app->env = reader.env;
+    return ERR_OK;
+}
+
+// add_needs moves the needs of spec by offset and adds more after them.
+static void add_needs(Arena *arena, ProcSpec *spec, size_t offset, const size_t *more, size_t more_count)
+{
+    size_t *needs = arena_push(arena, arena_size_mul(spec->need_count + more_count, sizeof *needs));
+    for (size_t i = 0; i < spec->need_count; i++) {
+        needs[i] = spec->needs[i] + offset;
+    }
+    for (size_t i = 0; i < more_count; i++) {
+        needs[spec->need_count + i] = more[i];
+    }
+    spec->needs = needs;
+    spec->need_count += more_count;
+}
+
+// adopt makes a proc of an app one of the including config's: named app:proc,
+// wrapped, with the include's env last, and stopped when the app is.
+static void adopt(Arena *arena, const Include *include, ProcSpec *spec)
+{
+    spec->name = str_format(arena, "%.*s:%.*s", (int)include->name.len, include->name.data, (int)spec->name.len,
+                            spec->name.data);
+    if (include->wrap.count > 0) {
+        StringList argv = strlist_copy(arena, include->wrap);
+        strlist_push_all(arena, &argv, spec->argv);
+        spec->argv = argv;
+    }
+    strlist_push_all(arena, &spec->env, include->env);
+    spec->autostart = spec->autostart && include->autostart;
+}
+
+// add_app adds an app's procs after config's: its setup job, which the others
+// need, then its own. ports holds the port of each proc in config, which the
+// app's must not take: a Procfile's procs by the PORT they are given.
+[[nodiscard]] static Error add_app(Reader *reader, const Included *app, Config *config, int *ports)
+{
+    Arena *arena = reader->arena;
+    const Include *include = &app->include;
+    String where = setting(arena, S("include"), include->name);
+    size_t first = config->proc_count;
+    const size_t *app_needs = include->needs;
+    size_t app_need_count = include->need_count;
+    if (include->setup.count > 0) {
+        size_t clash;
+        if (config_proc_index(&app->config, S("setup"), &clash)) {
+            return invalid(reader->err, include_node(include, S("setup")), setting(arena, where, S("setup")),
+                           "the app has a proc called setup already");
+        }
+        ProcSpec *setup = &config->procs[config->proc_count];
+        *setup = default_spec(S("setup"), include->directory);
+        setup->job = true;
+        setup->argv = include->setup;
+        setup->command = include->setup_command;
+        setup->env = strlist_copy(arena, app->env);
+        add_needs(arena, setup, 0, include->needs, include->need_count);
+        adopt(arena, include, setup);
+        ports[config->proc_count] = 0;
+        app_needs = &first;
+        app_need_count = 1;
+        config->proc_count++;
+    }
+    size_t offset = config->proc_count;
+    for (size_t i = 0; i < app->config.proc_count; i++) {
+        ProcSpec *spec = &config->procs[config->proc_count];
+        *spec = app->config.procs[i];
+        add_needs(arena, spec, offset, app_needs, app_need_count);
+        adopt(arena, include, spec);
+        ports[config->proc_count] = app->procfile ? port_from_env(spec->env) : spec->port;
+        config->proc_count++;
+    }
+    for (size_t i = first; i < config->proc_count; i++) {
+        for (size_t j = 0; j < first; j++) {
+            if (ports[i] > 0 && ports[i] == ports[j]) {
+                const ProcSpec *a = &config->procs[j];
+                const ProcSpec *b = &config->procs[i];
+                return invalid(reader->err, include_node(include, S("port")), where,
+                               str_cstr(arena, str_format(arena, "port %d of %.*s is also the port of %.*s", ports[i],
+                                                          (int)b->name.len, b->name.data, (int)a->name.len,
+                                                          a->name.data)));
+            }
+        }
+    }
+    return ERR_OK;
+}
+
+// read_includes reads each app of include: and adds its procs after config's.
+[[nodiscard]] static Error read_includes(Reader *reader, const Sections *sections, Config *config)
+{
+    Arena *arena = reader->arena;
+    const Node *node = sections->include;
+    if (node->kind != NODE_MAPPING || node->entry_count == 0) {
+        return invalid(reader->err, node, S("include"), "expected one or more apps, such as make-start: { port: 3001 }");
+    }
+    Include defaults = { .autostart = true };
+    if (sections->include_defaults != nullptr) {
+        Error e = read_include(reader, config, sections->include_defaults, S("include_defaults"), true, &defaults);
+        if (e != ERR_OK) {
+            return e;
+        }
+    }
+    Included *apps = arena_push(arena, arena_size_mul(node->entry_count, sizeof *apps));
+    size_t total = config->proc_count;
+    for (size_t i = 0; i < node->entry_count; i++) {
+        String name = node->entries[i].key;
+        const Node *value = node->entries[i].value;
+        String where = setting(arena, S("include"), name);
+        Include *include = &apps[i].include;
+        *include = defaults;
+        include->name = name;
+        include->directory = relative_to(arena, reader->directory, name);
+        include->node = value;
+        include->env = strlist_copy(arena, defaults.env);
+        size_t clash;
+        if (!is_name(name)) {
+            return invalid(reader->err, value, where, "a name is lowercase letters, digits, - and _");
+        }
+        if (config_proc_index(config, name, &clash)) {
+            return invalid(reader->err, value, where,
+                           str_cstr(arena, str_format(arena, "there is already a proc called %.*s", (int)name.len,
+                                                      name.data)));
+        }
+        Error e = read_include(reader, config, value, where, false, include);
+        if (e == ERR_OK) {
+            e = read_app(reader, &apps[i]);
+        }
+        if (e != ERR_OK) {
+            return e;
+        }
+        total += apps[i].config.proc_count + (include->setup.count > 0 ? 1 : 0);
+    }
+    ProcSpec *procs = arena_push(arena, arena_size_mul(total, sizeof *procs));
+    int *ports = arena_push(arena, arena_size_mul(total, sizeof *ports));
+    for (size_t i = 0; i < config->proc_count; i++) {
+        procs[i] = config->procs[i];
+        ports[i] = procs[i].port;
+    }
+    config->procs = procs;
+    for (size_t i = 0; i < node->entry_count; i++) {
+        Error e = add_app(reader, &apps[i], config, ports);
+        if (e != ERR_OK) {
+            return e;
+        }
+    }
+    return ERR_OK;
+}
+
+Error config_parse(Arena *arena, String text, String path, int inherited_port, Config *config, Err *err)
+{
+    *config = (Config) { .path = path, .directory = path_dir(path), .scrollback = DEFAULT_SCROLLBACK };
+    strlist_push(arena, &config->files, path);
+    Reader reader = {
+        .arena = arena,
+        .root = config->directory,
+        .directory = config->directory,
+        .files = &config->files,
+        .err = err,
+    };
+    if (is_procfile(path)) {
+        Error e = read_dotenv(&reader, &reader.env);
+        reader.first_port = either(port_from_env(reader.env), either(inherited_port, PROCFILE_FIRST_PORT));
+        return e == ERR_OK ? read_procfile(&reader, text, config) : e;
+    }
+    Sections sections = { 0 };
+    Error e = read_yaml(&reader, text, config, &sections);
+    if (e != ERR_OK || sections.include == nullptr) {
+        return e;
+    }
+    return read_includes(&reader, &sections, config);
 }
 
 Error config_load(Arena *arena, String path, Config *config, Err *err)
@@ -827,6 +1186,20 @@ Error config_load(Arena *arena, String path, Config *config, Err *err)
 bool config_find(Arena *arena, String directory, String *path)
 {
     return file_find_upward(arena, directory, strlist_of(arena, countof(CONFIG_NAMES), CONFIG_NAMES), path);
+}
+
+size_t config_select(const Config *config, String name, size_t *indexes)
+{
+    size_t count = 0;
+    for (size_t i = 0; i < config->proc_count; i++) {
+        String proc = config->procs[i].name;
+        String app;
+        String rest;
+        if (str_equal(proc, name) || (str_cut(proc, ':', &app, &rest) && str_equal(app, name))) {
+            indexes[count++] = i;
+        }
+    }
+    return count;
 }
 
 bool config_proc_index(const Config *config, String name, size_t *index)

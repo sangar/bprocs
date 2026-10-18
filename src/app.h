@@ -47,6 +47,7 @@ typedef struct App {
     Arena *views_arena; // the views, made again when the daemon is
     Client *client; // nullptr while the daemon has gone
     String config_path;
+    StringList config_files; // what the config was read from, in views_arena
     ProcView *views;
     size_t view_count;
     // all shows every proc's lines, each after its name, since the TUI opened.
@@ -89,7 +90,7 @@ typedef struct App {
     size_t daemon_count;
     size_t daemon_selected;
 
-    int64_t config_mtime_ns; // when the config was last changed, to notice an edit
+    int64_t config_mtime_ns; // when a config file was last changed, to notice an edit
     bool reloading; // the daemon reloads its config; reconnect when it lets go
 
     char toast[TOAST_LIMIT];
