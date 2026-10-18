@@ -3,6 +3,7 @@
 #include <stdatomic.h>
 
 #include "client.h"
+#include "group.h"
 #include "input.h"
 #include "layout.h"
 #include "logbuf.h"
@@ -53,8 +54,16 @@ typedef struct App {
     // all shows every proc's lines, each after its name, since the TUI opened.
     ProcView all;
     bool show_all;
-    size_t selected;
-    size_t list_offset; // the first process the list shows
+    // The procs of each app of include: show under a header. A group's view
+    // shows its procs together: their stats added up, their lines since the
+    // TUI opened, and the status of the one most in need of attention.
+    Group *groups;
+    ProcView *group_views;
+    size_t group_count;
+    Row *rows; // what the list shows
+    size_t row_count;
+    size_t selected;    // a row
+    size_t list_offset; // the first row the list shows
     Focus focus;
     size_t theme_index;
 
@@ -119,8 +128,12 @@ void app_destroy(App *app);
 Rgb app_accent(const App *app, size_t index);
 // app_waiting_for names the needs of process index that are not up yet, in the frame arena.
 String app_waiting_for(App *app, size_t index);
-// app_log_view is the view the log pane shows: the selected process, or all of them.
+// app_selected_view is the view of the selected row: a proc's, or a group's.
+ProcView *app_selected_view(App *app);
+// app_log_view is the view the log pane shows: the selected row's, or every proc's.
 ProcView *app_log_view(App *app);
+// app_group_worst is the proc of group most in need of attention.
+size_t app_group_worst(const App *app, size_t group);
 // app_search is the text searched for, empty when none.
 String app_search(const App *app);
 // app_matches is whether a log line holds the search, ignoring case.

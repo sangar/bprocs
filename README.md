@@ -67,8 +67,9 @@ With `--wait`, it stops everything once that proc ends and exits with its exit s
 
 | Keys | |
 |---|---|
-| `↑` `↓` `j` `k`, `1`…`9` | select a process, or scroll the log when it has the focus |
+| `↑` `↓` `j` `k`, `1`…`9` | select a row, or scroll the log when it has the focus |
 | `enter` `i` / `ctrl-a` | attach to the process and type into it / detach |
+| `h` `l`, `←` `→`, `enter` | hide or show the processes of an app of `include:` |
 | `tab` | move the focus between the list and the log |
 | `s` `x` `r` `K` | start, stop, restart, kill |
 | `S` `X` | start all, stop all |
@@ -206,6 +207,7 @@ include:
 - `wrap:` does not wrap `cmd:` checks, and the list shows each command as written.
 - An app's setting replaces the one in `include_defaults:`, but its `env:` adds to it.
 - `bprocs reload` reads every app's config again, and the TUI notices an edit to any of them or to an `.env`.
+- The TUI lists each app under a header, collapsed at first, after the top-level procs. The header shows the app's proc most in need of attention, so a crash shows on a collapsed app, and else how many of its procs are up. Selected, a header shows its procs' lines together, since the TUI opened, and `s`, `x`, `r` and `K` act on all of them.
 
 Run bprocs from the directory of this config, or with `-C ..` from an app's: inside `shop`, bprocs finds `shop`'s own config first and starts a second daemon, whose ports collide with the first's.
 

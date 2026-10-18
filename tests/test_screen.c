@@ -1,6 +1,7 @@
 #include "test.h"
 
 #include "draw.h"
+#include "group.h"
 #include "layout.h"
 #include "screen.h"
 
@@ -116,11 +117,49 @@ static void layout_fits_every_size(Test *test)
     test_check(test, !layout_compute(80, 24, 6).show_system, "a small terminal leaves out the system boxes");
 }
 
+static void groups_list_an_apps_procs_under_a_header(Test *test)
+{
+    static const char *const NAMES[] = { "db", "shop:setup", "shop:web", "admin:web" };
+    StringList names = strlist_of(test->arena, countof(NAMES), NAMES);
+    Group groups[countof(NAMES)];
+    size_t group_count = group_find(names, groups);
+    test_check(test, group_count == 2 && str_equal(groups[0].name, S("shop")) && groups[0].first == 1 &&
+                         groups[0].count == 2 && groups[1].first == 3,
+               "a group for each app, after the top-level procs");
+    Row rows[countof(NAMES) + countof(NAMES)];
+    size_t count = group_rows(groups, group_count, names.count, rows);
+    test_check(test, count == 3 && !rows[0].grouped && rows[1].header && rows[2].header && rows[2].proc == 3,
+               "collapsed, a group shows as its header");
+    groups[0].expanded = true;
+    count = group_rows(groups, group_count, names.count, rows);
+    test_check(test, count == 5 && rows[1].header && !rows[3].header && rows[3].grouped && rows[3].group == 0 &&
+                         rows[3].proc == 2 && rows[4].header,
+               "expanded, its procs follow the header");
+    test_check_str(test, group_short_name(S("shop:web")), S("web"), "a proc under a header shows by its short name");
+}
+
+static void groups_show_the_proc_most_in_need_of_attention(Test *test)
+{
+    ProcStatus crashed = { .state = PROC_CRASHED };
+    ProcStatus restarting = { .state = PROC_CRASHED, .restart_at_ns = 1 };
+    ProcStatus unhealthy = { .state = PROC_RUNNING, .health = HEALTH_UNHEALTHY };
+    ProcStatus running = { .state = PROC_RUNNING };
+    ProcStatus stopped = { .state = PROC_STOPPED };
+    ProcStatus done = { .state = PROC_EXITED };
+    test_check(test, group_rank(crashed) > group_rank(unhealthy) && group_rank(unhealthy) > group_rank(restarting) &&
+                         group_rank(restarting) > group_rank(running),
+               "a failure, then a failing check, then a restart coming, before running");
+    test_check(test, group_rank(running) > group_rank(stopped) && group_rank(stopped) > group_rank(done),
+               "a stopped proc only shows when none runs, and a finished setup job never");
+}
+
 const TestCase SCREEN_TESTS[] = {
     { "screen_writes_only_what_changed", screen_writes_only_what_changed },
     { "screen_keeps_wide_glyphs_whole", screen_keeps_wide_glyphs_whole },
     { "graphs_plot_in_braille", graphs_plot_in_braille },
     { "colours_blend_and_map_to_the_palette", colours_blend_and_map_to_the_palette },
     { "layout_fits_every_size", layout_fits_every_size },
+    { "groups_list_an_apps_procs_under_a_header", groups_list_an_apps_procs_under_a_header },
+    { "groups_show_the_proc_most_in_need_of_attention", groups_show_the_proc_most_in_need_of_attention },
     { nullptr, nullptr },
 };

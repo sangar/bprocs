@@ -56,15 +56,83 @@ static void destroy_views(App *app)
     for (size_t i = 0; i < app->view_count; i++) {
         logbuf_destroy(app->views[i].log);
     }
+    for (size_t i = 0; i < app->group_count; i++) {
+        logbuf_destroy(app->group_views[i].log);
+    }
     arena_reset(app->views_arena);
     app->config_files = (StringList) { 0 };
     app->views = nullptr;
     app->view_count = 0;
+    app->groups = nullptr;
+    app->group_views = nullptr;
+    app->group_count = 0;
+    app->rows = nullptr;
+    app->row_count = 0;
 }
 
-// build_views makes a view for each proc the daemon runs.
+ProcView *app_selected_view(App *app)
+{
+    const Row *row = &app->rows[app->selected];
+    return row->header ? &app->group_views[row->group] : &app->views[row->proc];
+}
+
+static bool selected_header(const App *app)
+{
+    return app->row_count > 0 && app->rows[app->selected].header;
+}
+
+// build_rows lists the rows again after a group was expanded or collapsed,
+// keeping the selected one.
+static void build_rows(App *app)
+{
+    app->row_count = group_rows(app->groups, app->group_count, app->view_count, app->rows);
+    app->selected = app->selected < app->row_count ? app->selected : 0;
+}
+
+// build_groups finds the groups among the views, expanding the ones named in expanded.
+static void build_groups(App *app, size_t scrollback, StringList expanded)
+{
+    StringList names = { 0 };
+    for (size_t i = 0; i < app->view_count; i++) {
+        strlist_push(app->frame, &names, app->views[i].spec.name);
+    }
+    app->groups = arena_push(app->views_arena, arena_size_mul(app->view_count, sizeof *app->groups));
+    app->group_count = group_find(names, app->groups);
+    app->group_views = arena_push(app->views_arena, arena_size_mul(app->group_count, sizeof *app->group_views));
+    for (size_t i = 0; i < app->group_count; i++) {
+        app->groups[i].expanded = strlist_contains(expanded, app->groups[i].name);
+        app->group_views[i] = (ProcView) {
+            .spec = { .name = app->groups[i].name },
+            .log = logbuf_create(scrollback, LOG_BYTES),
+            .following = true,
+        };
+    }
+    app->rows = arena_push(app->views_arena, arena_size_mul(app->view_count + app->group_count, sizeof *app->rows));
+    build_rows(app);
+}
+
+// select_named selects the row of the proc or group called name, else the first.
+static void select_named(App *app, String name)
+{
+    for (app->selected = 0; app->selected < app->row_count; app->selected++) {
+        if (str_equal(app_selected_view(app)->spec.name, name)) {
+            return;
+        }
+    }
+    app->selected = 0;
+}
+
+// build_views makes a view for each proc the daemon runs, and one for each
+// group, which keep being expanded and selected by name.
 static void build_views(App *app)
 {
+    StringList expanded = { 0 };
+    for (size_t i = 0; i < app->group_count; i++) {
+        if (app->groups[i].expanded) {
+            strlist_push(app->frame, &expanded, str_copy(app->frame, app->groups[i].name));
+        }
+    }
+    String selected = app->row_count > 0 ? str_copy(app->frame, app_selected_view(app)->spec.name) : S("");
     destroy_views(app);
     const ClientInfo *info = client_info(app->client);
     app->config_path = str_copy(app->arena, info->config_path);
@@ -93,7 +161,8 @@ static void build_views(App *app)
             .following = true,
         };
     }
-    app->selected = app->selected < app->view_count ? app->selected : 0;
+    build_groups(app, info->scrollback, expanded);
+    select_named(app, selected);
     app->list_offset = 0;
     logbuf_clear(app->all.log);
     app->all.following = true;
@@ -154,19 +223,14 @@ static void write_out(App *app, String text)
     app->toast_ns = app->now_ns;
 }
 
-static ProcView *selected_view(App *app)
-{
-    return &app->views[app->selected];
-}
-
 static String selected_name(App *app)
 {
-    return selected_view(app)->spec.name;
+    return app_selected_view(app)->spec.name;
 }
 
 static bool selected_active(App *app)
 {
-    return app->view_count > 0 && proc_state_active(selected_view(app)->status.state);
+    return app->view_count > 0 && proc_state_active(app_selected_view(app)->status.state);
 }
 
 String app_waiting_for(App *app, size_t index)
@@ -186,7 +250,31 @@ String app_waiting_for(App *app, size_t index)
 
 ProcView *app_log_view(App *app)
 {
-    return app->show_all ? &app->all : &app->views[app->selected];
+    return app->show_all ? &app->all : app_selected_view(app);
+}
+
+size_t app_group_worst(const App *app, size_t group)
+{
+    const Group *g = &app->groups[group];
+    size_t worst = g->first;
+    for (size_t i = g->first + 1; i < g->first + g->count; i++) {
+        if (group_rank(app->views[i].status) > group_rank(app->views[worst].status)) {
+            worst = i;
+        }
+    }
+    return worst;
+}
+
+// group_of is the group proc index is in, or false when it is a top-level proc.
+static bool group_of(const App *app, size_t index, size_t *group)
+{
+    for (size_t i = 0; i < app->group_count; i++) {
+        if (index >= app->groups[i].first && index < app->groups[i].first + app->groups[i].count) {
+            *group = i;
+            return true;
+        }
+    }
+    return false;
 }
 
 String app_search(const App *app)
@@ -206,8 +294,18 @@ bool app_matches(App *app, String line)
     return found;
 }
 
+// note_after_name adds line to log after name in color, padded to width.
+static void note_after_name(App *app, LogBuffer *log, String name, int width, Rgb color, String line)
+{
+    ArenaMark mark = arena_mark(app->frame);
+    logbuf_note(log, str_format(app->frame, "\x1b[38;2;%d;%d;%dm%-*.*s │\x1b[0m %.*s", color.r, color.g, color.b, width,
+                                (int)name.len, name.data, (int)line.len, line.data));
+    arena_release(mark);
+}
+
 // merge_lines copies the new complete lines of view index into the merged
-// log, each after the proc's name in its colour.
+// log, each after the proc's name in its colour, and into its group's log
+// after its short name.
 static void merge_lines(App *app, size_t index)
 {
     ProcView *view = &app->views[index];
@@ -215,15 +313,22 @@ static void merge_lines(App *app, size_t index)
     for (size_t i = 0; i < app->view_count; i++) {
         width = (int)app->views[i].spec.name.len > width ? (int)app->views[i].spec.name.len : width;
     }
+    size_t group;
+    bool grouped = group_of(app, index, &group);
+    int short_width = 0;
+    for (size_t i = 0; grouped && i < app->groups[group].count; i++) {
+        int len = (int)group_short_name(app->views[app->groups[group].first + i].spec.name).len;
+        short_width = len > short_width ? len : short_width;
+    }
     Rgb color = app_accent(app, index);
     uint64_t first = logbuf_first(view->log);
     for (uint64_t n = view->merged > first ? view->merged : first; n < logbuf_end(view->log); n++) {
-        ArenaMark mark = arena_mark(app->frame);
         String line = logbuf_line(view->log, n);
-        logbuf_note(app->all.log, str_format(app->frame, "\x1b[38;2;%d;%d;%dm%-*.*s │\x1b[0m %.*s", color.r, color.g,
-                                              color.b, width, (int)view->spec.name.len, view->spec.name.data,
-                                              (int)line.len, line.data));
-        arena_release(mark);
+        note_after_name(app, app->all.log, view->spec.name, width, color, line);
+        if (grouped) {
+            note_after_name(app, app->group_views[group].log, group_short_name(view->spec.name), short_width, color,
+                            line);
+        }
     }
     view->merged = logbuf_end(view->log);
 }
@@ -303,7 +408,7 @@ static void reconnect(App *app, const char *done)
     }
     app->client = client;
     build_views(app);
-    app->layout = layout_compute(screen_width(app->screen), screen_height(app->screen), app->view_count);
+    app->layout = layout_compute(screen_width(app->screen), screen_height(app->screen), app->row_count);
     if (subscribe(app, &err) != ERR_OK) {
         toast(app, "%s", err.msg);
         return;
@@ -377,6 +482,19 @@ static void take_all_stats(App *app, const Node *header)
         history_push(&stats->cpu, stats->cpu_now);
         history_push(&stats->memory, (float)stats->memory_now);
     }
+    for (size_t g = 0; g < app->group_count; g++) {
+        ProcStats *sum = &app->group_views[g].stats;
+        *sum = (ProcStats) { .cpu = sum->cpu, .memory = sum->memory };
+        for (size_t i = app->groups[g].first; i < app->groups[g].first + app->groups[g].count; i++) {
+            const ProcStats *stats = &app->views[i].stats;
+            sum->cpu_now += stats->cpu_now;
+            sum->memory_now += stats->memory_now;
+            sum->processes += stats->processes;
+            sum->threads += stats->threads;
+        }
+        history_push(&sum->cpu, sum->cpu_now);
+        history_push(&sum->memory, (float)sum->memory_now);
+    }
 }
 
 static void take_message(App *app, ClientMessage *message)
@@ -429,17 +547,17 @@ static void resize(App *app)
 {
     TerminalSize size = terminal_size(app->terminal);
     screen_resize(app->screen, size.columns, size.rows);
-    app->layout = layout_compute(size.columns, size.rows, app->view_count);
+    app->layout = layout_compute(size.columns, size.rows, app->row_count);
     send_size(app);
     app->dirty = true;
 }
 
 // ---- actions ----
 
-static void select_proc(App *app, size_t index)
+static void select_row(App *app, size_t row)
 {
-    if (index < app->view_count && index != app->selected) {
-        app->selected = index;
+    if (row < app->row_count && row != app->selected) {
+        app->selected = row;
         if (app->focus == FOCUS_INPUT) {
             app->focus = FOCUS_PROCS;
         }
@@ -449,10 +567,27 @@ static void select_proc(App *app, size_t index)
 static void move_selection(App *app, int delta)
 {
     if (delta < 0 && app->selected > 0) {
-        select_proc(app, app->selected - 1);
+        select_row(app, app->selected - 1);
     } else if (delta > 0) {
-        select_proc(app, app->selected + 1);
+        select_row(app, app->selected + 1);
     }
+}
+
+// expand_group shows or hides the procs of the selected row's group; on a
+// proc under a header, collapsing selects the header.
+static void expand_group(App *app, bool expanded)
+{
+    const Row *row = &app->rows[app->selected];
+    if (!row->grouped || app->groups[row->group].expanded == expanded) {
+        return;
+    }
+    size_t group = row->group;
+    app->groups[group].expanded = expanded;
+    String name = app->groups[group].name;
+    build_rows(app);
+    select_named(app, name);
+    app->layout = layout_compute(screen_width(app->screen), screen_height(app->screen), app->row_count);
+    send_size(app);
 }
 
 static int log_page(App *app)
@@ -482,6 +617,11 @@ static void scroll_log(App *app, int64_t delta)
 
 static void attach(App *app)
 {
+    if (selected_header(app)) {
+        String name = selected_name(app);
+        toast(app, "%.*s is an app · l shows its procs", (int)name.len, name.data);
+        return;
+    }
     if (!selected_active(app)) {
         String name = selected_name(app);
         toast(app, "%.*s is not running · s starts it", (int)name.len, name.data);
@@ -489,7 +629,17 @@ static void attach(App *app)
     }
     app->focus = FOCUS_INPUT;
     app->show_all = false;
-    selected_view(app)->following = true;
+    app_selected_view(app)->following = true;
+}
+
+// enter expands or collapses a header, and attaches to a proc.
+static void enter(App *app)
+{
+    if (selected_header(app)) {
+        expand_group(app, !app->groups[app->rows[app->selected].group].expanded);
+        return;
+    }
+    attach(app);
 }
 
 static void start_selected(App *app)
@@ -514,7 +664,7 @@ static void restart_selected(App *app)
 {
     String name = selected_name(app);
     send_simple(app, "restart", name);
-    selected_view(app)->following = true;
+    app_selected_view(app)->following = true;
     toast(app, "↻ restarting %.*s", (int)name.len, name.data);
 }
 
@@ -622,9 +772,41 @@ static void take_search_key(App *app, Event event)
     }
 }
 
+// clear_selected clears the log of the selected proc, or of every proc of the selected group.
+static void clear_selected(App *app)
+{
+    const Row *row = &app->rows[app->selected];
+    if (!row->header) {
+        send_simple(app, "clear", selected_name(app));
+        return;
+    }
+    const Group *group = &app->groups[row->group];
+    for (size_t i = group->first; i < group->first + group->count; i++) {
+        send_simple(app, "clear", app->views[i].spec.name);
+    }
+    logbuf_clear(app->group_views[row->group].log);
+    app->group_views[row->group].following = true;
+}
+
+// port_spec is the selected proc, or the first proc of the selected group with a port.
+static const ProcSpec *port_spec(App *app)
+{
+    const Row *row = &app->rows[app->selected];
+    if (!row->header) {
+        return &app->views[row->proc].spec;
+    }
+    const Group *group = &app->groups[row->group];
+    for (size_t i = group->first; i < group->first + group->count; i++) {
+        if (app->views[i].spec.port > 0) {
+            return &app->views[i].spec;
+        }
+    }
+    return &app->group_views[row->group].spec;
+}
+
 static void open_port(App *app)
 {
-    const ProcSpec *spec = &selected_view(app)->spec;
+    const ProcSpec *spec = port_spec(app);
     if (spec->port == 0) {
         toast(app, "%.*s has no port · set port: in the config", (int)spec->name.len, spec->name.data);
         return;
@@ -730,12 +912,11 @@ static void switch_project(App *app)
         client_close(app->client);
     }
     app->client = client;
-    app->selected = 0;
     app->show_all = false;
     app->daemon_gone = false;
     app->focus = FOCUS_PROCS;
     build_views(app);
-    app->layout = layout_compute(screen_width(app->screen), screen_height(app->screen), app->view_count);
+    app->layout = layout_compute(screen_width(app->screen), screen_height(app->screen), app->row_count);
     if (subscribe(app, &err) != ERR_OK) {
         toast(app, "%s", err.msg);
         return;
@@ -849,14 +1030,20 @@ static void handle_char(App *app, uint32_t c)
         attach(app);
         return;
     case 'c':
-        send_simple(app, "clear", selected_name(app));
+        clear_selected(app);
+        return;
+    case 'h':
+        expand_group(app, false);
+        return;
+    case 'l':
+        expand_group(app, true);
         return;
     case 't':
         next_theme(app);
         return;
     default:
         if (c >= '1' && c <= '9') {
-            select_proc(app, (size_t)(c - '1'));
+            select_row(app, (size_t)(c - '1'));
         }
         return;
     }
@@ -904,18 +1091,24 @@ static void handle_key(App *app, Event event)
     case KEY_PAGE_DOWN:
         scroll_log(app, log_page(app));
         return;
+    case KEY_LEFT:
+        expand_group(app, false);
+        return;
+    case KEY_RIGHT:
+        expand_group(app, true);
+        return;
     case KEY_HOME:
-        log_focused ? scroll_log(app, INT32_MIN) : select_proc(app, 0);
+        log_focused ? scroll_log(app, INT32_MIN) : select_row(app, 0);
         return;
     case KEY_END:
-        log_focused ? (void)(app_log_view(app)->following = true) : select_proc(app, app->view_count - 1);
+        log_focused ? (void)(app_log_view(app)->following = true) : select_row(app, app->row_count - 1);
         return;
     case KEY_TAB:
     case KEY_BACKTAB:
         app->focus = log_focused ? FOCUS_PROCS : FOCUS_LOG;
         return;
     case KEY_ENTER:
-        attach(app);
+        enter(app);
         return;
     case KEY_ESCAPE:
         app->focus = FOCUS_PROCS;
@@ -947,7 +1140,12 @@ static void handle_mouse(App *app, Event event)
     }
     int row = event.y - layout->procs.y - 2;
     if (event.mouse == MOUSE_PRESS && row >= 0) {
-        select_proc(app, app->list_offset + (size_t)row);
+        size_t clicked = app->list_offset + (size_t)row;
+        // A second click on a header expands or collapses it.
+        if (clicked == app->selected && selected_header(app)) {
+            enter(app);
+        }
+        select_row(app, clicked);
         app->focus = FOCUS_PROCS;
     }
 }
@@ -987,7 +1185,7 @@ static void handle_event(App *app, Event event)
         }
         // The program did not ask for paste markers.
         send_input(app, event.key == KEY_PASTE ? input_paste_text(event.raw) : event.raw);
-        selected_view(app)->following = true;
+        app_selected_view(app)->following = true;
         return;
     }
     if (app->view_count == 0) {
@@ -1081,6 +1279,15 @@ static void tick(App *app)
             toast(app, "⊘ %.*s cannot start: %s", (int)name.len, name.data, view->status.problem);
         }
     }
+    // A group shows its proc most in need of attention, and flashes as a proc does.
+    for (size_t i = 0; i < app->group_count; i++) {
+        ProcView *view = &app->group_views[i];
+        view->status = app->views[app_group_worst(app, i)].status;
+        if (view->status.state != view->seen_state) {
+            view->seen_state = view->status.state;
+            view->state_changed_ns = app->now_ns;
+        }
+    }
     if (app->focus == FOCUS_INPUT && !selected_active(app)) {
         app->focus = FOCUS_PROCS;
     }
@@ -1098,8 +1305,8 @@ static void keep_selection_visible(App *app)
     if (app->selected >= app->list_offset + rows) {
         app->list_offset = app->selected - rows + 1;
     }
-    if (app->list_offset + rows > app->view_count) {
-        app->list_offset = app->view_count > rows ? app->view_count - rows : 0;
+    if (app->list_offset + rows > app->row_count) {
+        app->list_offset = app->row_count > rows ? app->row_count - rows : 0;
     }
 }
 

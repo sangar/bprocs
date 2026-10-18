@@ -9,5 +9,5 @@ void ui_draw(App *app);
 // app keeps drawing frames without new events.
 bool ui_animating(App *app);
 
-// ui_list_rows is how many processes the list shows at once.
+// ui_list_rows is how many rows the list shows at once.
 int ui_list_rows(const App *app);

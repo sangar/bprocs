@@ -241,6 +241,16 @@ normal ones.
 
 ## Phase 3: TUI grouping
 
+Status: done. Beyond the plan below: a selected header's detail box adds up
+its procs' usage and names the one most in need of attention, and its log
+shows their lines together since the TUI opened, each after its short name.
+`c` clears every log of the group, `o` opens its first port, and attach says
+to pick a proc. Groups start collapsed and keep being expanded, and the
+selection kept, by name across a reload. The worst state ranks a failure,
+then a failing health check, a restart coming, starting or stopping,
+running, stopped, idle, and last a finished job, so a done `setup` never
+colours its header. The grouping is in `src/group.c`.
+
 - Group procs by the part of the name before `:` with a header row. Top-level
   procs, with no `:`, stay ungrouped above the groups. The header shows the
   worst state of its children, so a crashed `web` is red on a collapsed group.

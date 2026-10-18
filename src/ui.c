@@ -32,7 +32,11 @@ enum {
     GLYPH_SELECTED = 0x258E,  // ▎
     GLYPH_DIVIDER = 0x2502,   // │
     GLYPH_THUMB = 0x2503,     // ┃
+    GLYPH_EXPANDED = 0x25BE,  // ▾
+    GLYPH_COLLAPSED = 0x25B8, // ▸
 };
+
+enum { GROUP_INDENT = 2 }; // where a proc under a header starts, past the header's arrow
 
 static const float TAU = 6.2831853f;
 
@@ -354,11 +358,11 @@ static String status_word(App *app, ProcStatus status, Rgb *color)
     return S("");
 }
 
-static void paint_row(App *app, Rect inner, int y, size_t index, ProcStatus status)
+static void paint_row(App *app, Rect inner, int y, size_t row, const ProcView *view)
 {
     const Theme *theme = current_theme(app);
-    bool selected = index == app->selected;
-    const ProcView *view = &app->views[index];
+    bool selected = row == app->selected;
+    ProcStatus status = view->status;
     float flash_ms = elapsed_ms(app, view->state_changed_ns);
     bool flashing = (status.state == PROC_CRASHED || status.state == PROC_FAILED) && flash_ms < FLASH_MS;
     for (int x = inner.x; x < inner.x + inner.width; x++) {
@@ -380,32 +384,10 @@ static void paint_row(App *app, Rect inner, int y, size_t index, ProcStatus stat
     }
 }
 
-static void draw_row(App *app, Rect inner, Columns columns, int y, size_t index)
+// draw_usage fills the cpu, sparkline and memory columns of a row.
+static void draw_usage(App *app, Columns columns, int y, const ProcStats *stats, bool active)
 {
     const Theme *theme = current_theme(app);
-    const ProcView *view = &app->views[index];
-    const ProcSpec *spec = &view->spec;
-    ProcStatus status = view->status;
-    bool selected = index == app->selected;
-    bool active = proc_state_active(status.state);
-    paint_row(app, inner, y, index, status);
-
-    uint32_t glyph;
-    Rgb glyph_color;
-    status_mark(app, index, status, &glyph, &glyph_color);
-    screen_glyph(app->screen, inner.x + 1, y, glyph, glyph_color, 0);
-
-    Rgb name_color = app_accent(app, index);
-    if (!active && status.state != PROC_CRASHED) {
-        name_color = rgb_mix(name_color, theme->muted, 0.55f);
-    }
-    screen_text(app->screen, columns.name_x, y, columns.name_width, text_fit(spec->name, columns.name_width), name_color,
-                selected ? ATTR_BOLD : 0);
-    if (columns.port && spec->port > 0) {
-        screen_text(app->screen, columns.port_x, y, PORT_WIDTH, str_format(app->frame, ":%d", spec->port),
-                    theme->muted, 0);
-    }
-    const ProcStats *stats = &view->stats;
     if (columns.cpu) {
         String cpu = active ? str_format(app->frame, "%.0f%%", (double)stats->cpu_now * 100.0) : S("·");
         draw_text_right(app->screen, columns.cpu_x + CPU_WIDTH, y, cpu,
@@ -420,9 +402,110 @@ static void draw_row(App *app, Rect inner, Columns columns, int y, size_t index)
         draw_text_right(app->screen, columns.memory_x + MEMORY_WIDTH, y, memory, active ? theme->text : theme->muted,
                         0);
     }
+}
+
+// draw_proc_row draws a proc; under a header, indented and by its short name.
+static void draw_proc_row(App *app, Rect inner, Columns columns, int y, size_t row)
+{
+    const Theme *theme = current_theme(app);
+    size_t index = app->rows[row].proc;
+    const ProcView *view = &app->views[index];
+    const ProcSpec *spec = &view->spec;
+    ProcStatus status = view->status;
+    bool selected = row == app->selected;
+    bool active = proc_state_active(status.state);
+    int indent = app->rows[row].grouped ? GROUP_INDENT : 0;
+    paint_row(app, inner, y, row, view);
+
+    uint32_t glyph;
+    Rgb glyph_color;
+    status_mark(app, index, status, &glyph, &glyph_color);
+    screen_glyph(app->screen, inner.x + 1 + indent, y, glyph, glyph_color, 0);
+
+    Rgb name_color = app_accent(app, index);
+    if (!active && status.state != PROC_CRASHED) {
+        name_color = rgb_mix(name_color, theme->muted, 0.55f);
+    }
+    String name = indent > 0 ? group_short_name(spec->name) : spec->name;
+    int name_width = columns.name_width - indent;
+    screen_text(app->screen, columns.name_x + indent, y, name_width, text_fit(name, name_width), name_color,
+                selected ? ATTR_BOLD : 0);
+    if (columns.port && spec->port > 0) {
+        screen_text(app->screen, columns.port_x, y, PORT_WIDTH, str_format(app->frame, ":%d", spec->port),
+                    theme->muted, 0);
+    }
+    draw_usage(app, columns, y, &view->stats, active);
     if (columns.status) {
         Rgb color;
         String word = text_fit(status_word(app, status, &color), STATUS_WIDTH);
+        draw_text_right(app->screen, columns.status_x + STATUS_WIDTH, y, word, color, 0);
+    }
+}
+
+// is_up is whether a proc is as it should be once started: running, or a job that succeeded.
+static bool is_up(ProcState state)
+{
+    return state == PROC_RUNNING || state == PROC_EXITED;
+}
+
+// count_group counts the procs of a group that are up and that run.
+static void count_group(const App *app, size_t group, size_t *up, size_t *active)
+{
+    const Group *g = &app->groups[group];
+    *up = 0;
+    *active = 0;
+    for (size_t i = g->first; i < g->first + g->count; i++) {
+        *up += is_up(app->views[i].status.state);
+        *active += proc_state_active(app->views[i].status.state);
+    }
+}
+
+// group_word says how a group is doing: how many of its procs are up while
+// they are fine, else how its proc most in need of attention is.
+static String group_word(App *app, size_t group, Rgb *color)
+{
+    const Theme *theme = current_theme(app);
+    ProcStatus worst = app->group_views[group].status;
+    size_t up;
+    size_t active;
+    count_group(app, group, &up, &active);
+    if (active == 0 || group_rank(worst) > RANK_RUNNING) {
+        return status_word(app, worst, color);
+    }
+    *color = up == app->groups[group].count ? theme->text : theme->muted;
+    return str_format(app->frame, "%zu/%zu", up, app->groups[group].count);
+}
+
+// draw_header draws a group: the status of its proc most in need of
+// attention, an arrow that says whether its procs show, and their usage added up.
+static void draw_header(App *app, Rect inner, Columns columns, int y, size_t row)
+{
+    const Theme *theme = current_theme(app);
+    size_t group = app->rows[row].group;
+    const Group *g = &app->groups[group];
+    const ProcView *view = &app->group_views[group];
+    size_t up;
+    size_t active;
+    count_group(app, group, &up, &active);
+    paint_row(app, inner, y, row, view);
+
+    uint32_t glyph;
+    Rgb glyph_color;
+    status_mark(app, app_group_worst(app, group), view->status, &glyph, &glyph_color);
+    screen_glyph(app->screen, inner.x + 1, y, glyph, glyph_color, 0);
+    screen_glyph(app->screen, columns.name_x, y, g->expanded ? GLYPH_EXPANDED : GLYPH_COLLAPSED, theme->muted, 0);
+
+    Rgb name_color = app_accent(app, g->first);
+    if (active == 0 && view->status.state != PROC_CRASHED) {
+        name_color = rgb_mix(name_color, theme->muted, 0.55f);
+    }
+    int name_width = columns.name_width - GROUP_INDENT;
+    screen_text(app->screen, columns.name_x + GROUP_INDENT, y, name_width, text_fit(g->name, name_width), name_color,
+                ATTR_BOLD);
+    draw_usage(app, columns, y, &view->stats, active > 0);
+    if (columns.status) {
+        Rgb color;
+        String word = text_fit(group_word(app, group, &color), STATUS_WIDTH);
         draw_text_right(app->screen, columns.status_x + STATUS_WIDTH, y, word, color, 0);
     }
 }
@@ -486,10 +569,12 @@ static void draw_procs(App *app, Rect rect)
     Columns columns = list_columns(inner);
     draw_list_header(app, inner, columns);
     size_t rows = (size_t)ui_list_rows(app);
-    for (size_t row = 0; row < rows && app->list_offset + row < app->view_count; row++) {
-        draw_row(app, inner, columns, inner.y + 1 + (int)row, app->list_offset + row);
+    for (size_t i = 0; i < rows && app->list_offset + i < app->row_count; i++) {
+        size_t row = app->list_offset + i;
+        int y = inner.y + 1 + (int)i;
+        app->rows[row].header ? draw_header(app, inner, columns, y, row) : draw_proc_row(app, inner, columns, y, row);
     }
-    draw_scrollbar(app, rect, app->list_offset, rows, app->view_count, theme->focus);
+    draw_scrollbar(app, rect, app->list_offset, rows, app->row_count, theme->focus);
 }
 
 // ---- details of the selected process ----
@@ -562,50 +647,11 @@ static void draw_graph_label(App *app, int x, int y, String label, String value,
     screen_text(app->screen, x, y, 12, value, value_color, ATTR_BOLD);
 }
 
-static void draw_detail(App *app, Rect rect)
+// draw_detail_graphs draws the cpu and memory history of stats in the rows
+// of inner below its first, above its last.
+static void draw_detail_graphs(App *app, Rect inner, const ProcStats *stats)
 {
     const Theme *theme = current_theme(app);
-    const ProcView *view = &app->views[app->selected];
-    const ProcSpec *spec = &view->spec;
-    ProcStatus status = view->status;
-    Rgb state_color;
-    String state = state_label(app, app->selected, &state_color);
-    draw_box(app->screen, rect,
-             box_style(app, spec->name, app_accent(app, app->selected), state, state_color, false));
-    Rect inner = rect_inner(rect);
-    if (inner.width < 20 || inner.height < 3) {
-        return;
-    }
-    const ProcStats *stats = &view->stats;
-    bool active = proc_state_active(status.state);
-    int end = inner.x + inner.width;
-    int x = inner.x + 1;
-    if (active) {
-        x = draw_fact(app, x, inner.y, end, S("pid"), str_format(app->frame, "%d", status.pid));
-        x = draw_fact(app, x, inner.y, end, S("up"), format_span(app->frame, app->now_ns - status.started_ns));
-        x = draw_fact(app, x, inner.y, end, S("procs"), str_format(app->frame, "%zu", stats->processes));
-        x = draw_fact(app, x, inner.y, end, S("threads"), str_format(app->frame, "%zu", stats->threads));
-    }
-    x = draw_fact(app, x, inner.y, end, S("restarts"), str_format(app->frame, "%u", status.restarts));
-    if (spec->need_count > 0) {
-        StringList names = { 0 };
-        for (size_t i = 0; i < spec->need_count; i++) {
-            strlist_push(app->frame, &names, app->views[spec->needs[i]].spec.name);
-        }
-        draw_fact(app, x, inner.y, end, S("needs"), str_join(app->frame, names, S(" ")));
-    }
-
-    int bottom = inner.y + inner.height - 1;
-    if (status.problem[0] != '\0') {
-        String problem = str_format(app->frame, "✖ %s", status.problem);
-        screen_text(app->screen, inner.x + 1, bottom, inner.width - 2, text_fit(problem, inner.width - 2),
-                    theme->failed, 0);
-    } else {
-        String command = str_format(app->frame, "$ %.*s", (int)spec->command.len, spec->command.data);
-        screen_text(app->screen, inner.x + 1, bottom, inner.width - 2, text_fit(command, inner.width - 2),
-                    rgb_mix(theme->muted, theme->text, 0.2f), ATTR_ITALIC);
-    }
-
     int graph_height = inner.height - 2;
     if (graph_height < 1) {
         return;
@@ -635,6 +681,103 @@ static void draw_detail(App *app, Rect rect)
     String memory_peak = format_size(app->frame, (uint64_t)history_peak(&stats->memory, span));
     draw_text_right(app->screen, memory.x + memory.width - 1, memory.y,
                     str_format(app->frame, "peak %.*s", (int)memory_peak.len, memory_peak.data), theme->muted, 0);
+}
+
+// draw_bottom_line puts a problem, or else text, on the last row of inner.
+static void draw_bottom_line(App *app, Rect inner, const char *problem, String text)
+{
+    const Theme *theme = current_theme(app);
+    int bottom = inner.y + inner.height - 1;
+    if (problem[0] != '\0') {
+        String line = str_format(app->frame, "✖ %s", problem);
+        screen_text(app->screen, inner.x + 1, bottom, inner.width - 2, text_fit(line, inner.width - 2), theme->failed,
+                    0);
+        return;
+    }
+    screen_text(app->screen, inner.x + 1, bottom, inner.width - 2, text_fit(text, inner.width - 2),
+                rgb_mix(theme->muted, theme->text, 0.2f), ATTR_ITALIC);
+}
+
+static void draw_proc_detail(App *app, Rect rect, size_t index)
+{
+    const ProcView *view = &app->views[index];
+    const ProcSpec *spec = &view->spec;
+    ProcStatus status = view->status;
+    Rgb state_color;
+    String state = state_label(app, index, &state_color);
+    draw_box(app->screen, rect, box_style(app, spec->name, app_accent(app, index), state, state_color, false));
+    Rect inner = rect_inner(rect);
+    if (inner.width < 20 || inner.height < 3) {
+        return;
+    }
+    const ProcStats *stats = &view->stats;
+    bool active = proc_state_active(status.state);
+    int end = inner.x + inner.width;
+    int x = inner.x + 1;
+    if (active) {
+        x = draw_fact(app, x, inner.y, end, S("pid"), str_format(app->frame, "%d", status.pid));
+        x = draw_fact(app, x, inner.y, end, S("up"), format_span(app->frame, app->now_ns - status.started_ns));
+        x = draw_fact(app, x, inner.y, end, S("procs"), str_format(app->frame, "%zu", stats->processes));
+        x = draw_fact(app, x, inner.y, end, S("threads"), str_format(app->frame, "%zu", stats->threads));
+    }
+    x = draw_fact(app, x, inner.y, end, S("restarts"), str_format(app->frame, "%u", status.restarts));
+    if (spec->need_count > 0) {
+        StringList names = { 0 };
+        for (size_t i = 0; i < spec->need_count; i++) {
+            strlist_push(app->frame, &names, app->views[spec->needs[i]].spec.name);
+        }
+        draw_fact(app, x, inner.y, end, S("needs"), str_join(app->frame, names, S(" ")));
+    }
+    draw_bottom_line(app, inner, status.problem,
+                     str_format(app->frame, "$ %.*s", (int)spec->command.len, spec->command.data));
+    draw_detail_graphs(app, inner, stats);
+}
+
+// draw_group_detail shows a group: how its proc most in need of attention
+// is, how many are up, and their usage added up.
+static void draw_group_detail(App *app, Rect rect, size_t group)
+{
+    const Theme *theme = current_theme(app);
+    const Group *g = &app->groups[group];
+    const ProcView *view = &app->group_views[group];
+    size_t worst = app_group_worst(app, group);
+    Rgb state_color;
+    String state = state_label(app, worst, &state_color);
+    size_t up;
+    size_t active;
+    count_group(app, group, &up, &active);
+    if (group_rank(view->status) > RANK_RUNNING) {
+        String name = group_short_name(app->views[worst].spec.name);
+        state = str_format(app->frame, "%.*s · %.*s", (int)name.len, name.data, (int)state.len, state.data);
+    } else if (active > 0) {
+        state = str_format(app->frame, "%zu/%zu up", up, g->count);
+        state_color = up == g->count ? theme->running : theme->muted;
+    }
+    draw_box(app->screen, rect, box_style(app, g->name, app_accent(app, g->first), state, state_color, false));
+    Rect inner = rect_inner(rect);
+    if (inner.width < 20 || inner.height < 3) {
+        return;
+    }
+    const ProcStats *stats = &view->stats;
+    unsigned restarts = 0;
+    StringList names = { 0 };
+    for (size_t i = g->first; i < g->first + g->count; i++) {
+        restarts += app->views[i].status.restarts;
+        strlist_push(app->frame, &names, group_short_name(app->views[i].spec.name));
+    }
+    int end = inner.x + inner.width;
+    int x = inner.x + 1;
+    x = draw_fact(app, x, inner.y, end, S("procs"), str_format(app->frame, "%zu", stats->processes));
+    x = draw_fact(app, x, inner.y, end, S("threads"), str_format(app->frame, "%zu", stats->threads));
+    draw_fact(app, x, inner.y, end, S("restarts"), str_format(app->frame, "%u", restarts));
+    draw_bottom_line(app, inner, view->status.problem, str_join(app->frame, names, S(" · ")));
+    draw_detail_graphs(app, inner, stats);
+}
+
+static void draw_detail(App *app, Rect rect)
+{
+    const Row *row = &app->rows[app->selected];
+    row->header ? draw_group_detail(app, rect, row->group) : draw_proc_detail(app, rect, row->proc);
 }
 
 // ---- log ----
@@ -782,7 +925,7 @@ static void draw_log(App *app, Rect rect)
     Rgb info_color;
     String info = log_info(app, view, end, &info_color);
     String title = str_format(app->frame, "log · %.*s", (int)spec->name.len, spec->name.data);
-    Rgb title_color = app->show_all ? theme->text : app_accent(app, app->selected);
+    Rgb title_color = app->show_all ? theme->text : app_accent(app, app->rows[app->selected].proc);
     Box box = box_style(app, title, title_color, info, info_color, focused);
     if (attached) {
         box.glow = rgb_mix(theme->highlight, theme->focus, wave(app, PULSE_MS, 0.0f));
@@ -818,7 +961,9 @@ static void draw_log(App *app, Rect rect)
     bool empty = end == first && partial.len == 0;
 
     if (empty) {
-        String text = app->show_all ? S("lines of every process show here as they come") : placeholder(status);
+        String text = app->show_all                       ? S("lines of every process show here as they come")
+                      : app->rows[app->selected].header ? S("lines of its processes show here as they come")
+                                                        : placeholder(status);
         int x = area.x + (area.width - text_columns(text)) / 2;
         screen_text(app->screen, x, area.y + area.height / 2, area.width, text, theme->muted, ATTR_ITALIC);
     }
@@ -871,7 +1016,7 @@ static void draw_footer(App *app, Rect rect)
         screen_paint(app->screen, (Rect) { x, rect.y, width, 1 }, theme->highlight);
         screen_text(app->screen, x, rect.y, width, pill, theme->background, ATTR_BOLD);
         x += width + 1;
-        const ProcSpec *spec = &app->views[app->selected].spec;
+        const ProcSpec *spec = &app_selected_view(app)->spec;
         String text = str_format(app->frame, "keys go to %.*s · ctrl-a detaches", (int)spec->name.len, spec->name.data);
         screen_text(app->screen, x, rect.y, end - x, text_fit(text, end - x), theme->text, 0);
         return;
@@ -949,8 +1094,9 @@ static void draw_help(App *app)
         const char *what;
     } KEYS[] = {
         { "↑ ↓  j k", "select a process, or scroll the log" },
-        { "1 … 9", "select a process by number" },
+        { "1 … 9", "select a row by number" },
         { "enter  i", "attach: type into the process" },
+        { "h l  ← →", "hide or show an app's processes; enter too" },
         { "ctrl-a", "detach again" },
         { "tab", "move between the list and the log" },
         { "s  x  r", "start, stop, restart" },
