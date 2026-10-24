@@ -168,7 +168,7 @@ A `Procfile`, `Procfile.dev` or any other `Procfile.*` is read as foreman reads 
 
 - Each line is `name: command`. The name is letters, digits, `-` and `_`, and the command runs in `/bin/sh -c`. Blank lines and `#` comments are skipped, and any other line is an error with its line number.
 - A `.env` beside the Procfile is read when there is one.
-- `PORT` is 5000 for the first proc, 5100 for the next and so on, or starts at the `.env`'s `PORT`, else at the `PORT` bprocs runs with. That is the daemon's, from when it started: a `bprocs reload` does not see a `PORT` changed since. It is not the proc's `port`: bprocs cannot tell whether the program listens on it, so the list shows no port, and a port in use does not stop the proc from starting.
+- `PORT` is 3000 for the first proc, 3001 for the next and so on, or starts at the `.env`'s `PORT`, else at the `PORT` bprocs runs with. That is the daemon's, from when it started: a `bprocs reload` does not see a `PORT` changed since. It is not the proc's `port`: bprocs cannot tell whether the program listens on it, so the list shows no port, and a port in use does not stop the proc from starting.
 - Every proc gets the defaults above, so it starts with the others, does not restart, and has no checks. For needs, checks, restarts or log files, write a `bprocs.yml`.
 
 ### Apps with their own config
@@ -202,7 +202,7 @@ include:
 - An app's procs are named `shop:web`, `shop:worker` and so on, and run in its directory. `bprocs start shop`, and `stop`, `restart` and the others, act on all of them.
 - An app's `bprocs.yml` is read instead of its `Procfile`. It is read as any `bprocs.yml`, with paths and `log_dir` relative to the app; its `needs` name its own procs. It takes no `theme`, `scrollback` or `include`, and its include takes no `port:`, as its procs set their own.
 - The environment of an app's proc is, later entries winning: the top-level `env_file:` and `env:`, the app's `.env`, for a `bprocs.yml` its own `env_file:` and `env:`, then the proc's `PORT` and its own, then the include's `env:`.
-- A `Procfile`'s `PORT`s start at the include's `port:`, else at the `.env`'s `PORT`, else at 5000, and not at the `PORT` bprocs runs with, which every app would share. They are checked against every port of the other apps and the top-level procs: `shop` at 3000 gives its second proc 3100, which another app cannot have.
+- A `Procfile`'s `PORT`s start at the include's `port:`, else at the `.env`'s `PORT`, else at 3000, and not at the `PORT` bprocs runs with, which every app would share. They are checked against every port of the other apps and the top-level procs: `shop` at 3000 gives its second proc 3001, which another app cannot have.
 - `needs:` goes on the setup job when there is one, else on every proc of the app.
 - `wrap:` does not wrap `cmd:` checks, and the list shows each command as written.
 - An app's setting replaces the one in `include_defaults:`, but its `env:` adds to it.

@@ -13,8 +13,8 @@ enum {
     HEALTH_EVERY_MS = 10000,
     HEALTH_FAILURES = 3,
     STOP_TIMEOUT_MS = 5000,
-    PROCFILE_FIRST_PORT = 5000, // foreman's ports: 5000 for the first proc, 5100 for the next
-    PROCFILE_PORT_STEP = 100,
+    PROCFILE_FIRST_PORT = 3000, // 3000 for the first proc, 3001 for the next
+    PROCFILE_PORT_STEP = 1,
 };
 
 // Reader is what reading one config needs at every level. An app of
@@ -774,7 +774,7 @@ static bool is_procfile_name(String name)
 }
 
 // read_procfile reads a Procfile as foreman does: name: command lines run in
-// sh -c, each with the reader's env and PORT in steps of 100 from its
+// sh -c, each with the reader's env and PORT in steps of 1 from its
 // first_port. That PORT is not the proc's port, as bprocs cannot tell whether
 // the program listens on it.
 [[nodiscard]] static Error read_procfile(Reader *reader, String text, Config *config)

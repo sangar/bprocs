@@ -169,17 +169,17 @@ static void config_reads_a_procfile_as_foreman_does(Test *test)
                    "with the .env beside it");
         test_check_str(test, web->env.items[web->env.count - 1], S("PORT=3000"),
                        "PORT starts at the .env's PORT, before the inherited one");
-        test_check_str(test, worker->env.items[worker->env.count - 1], S("PORT=3100"), "and goes up by 100");
+        test_check_str(test, worker->env.items[worker->env.count - 1], S("PORT=3001"), "and goes up by 1");
         test_check(test, web->port == 0, "PORT is not the proc's port");
     }
     test_check(test, dir_remove_all(dir, &err) == ERR_OK, "clean up");
 
     parsed = config_parse(a, S("web: x\n"), S("/home/me/Procfile"), 0, &config, &err);
-    test_check(test, parsed == ERR_OK && str_equal(config.procs[0].env.items[0], S("PORT=5000")),
-               "without a .env PORT starts at 5000");
+    test_check(test, parsed == ERR_OK && str_equal(config.procs[0].env.items[0], S("PORT=3000")),
+               "without a .env PORT starts at 3000");
     parsed = config_parse(a, S("web: x\nworker: y\n"), S("/home/me/Procfile"), 3001, &config, &err);
     test_check(test, parsed == ERR_OK && str_equal(config.procs[0].env.items[0], S("PORT=3001")) &&
-                         str_equal(config.procs[1].env.items[0], S("PORT=3101")),
+                         str_equal(config.procs[1].env.items[0], S("PORT=3002")),
                "without a .env PORT starts at the inherited PORT");
     static const struct {
         const char *text;
@@ -219,7 +219,7 @@ static void config_reads_included_apps(Test *test)
         { "shop/.env", "SHARED=dotenv\nPORT=4000\n" },
         { "apps/admin/bprocs.yml", "env: { OWN: app }\n"
                                    "procs:\n"
-                                   "  web: { run: x, port: 3002, log: true }\n"
+                                   "  web: { run: x, port: 3010, log: true }\n"
                                    "  worker: { run: y, needs: [web] }\n" },
     };
     write_files(test, dir, FILES, countof(FILES));
@@ -266,7 +266,7 @@ static void config_reads_included_apps(Test *test)
     for (size_t i = 0; i < countof(WEB_ENV) && i < web->env.count; i++) {
         test_check_str(test, web->env.items[i], S(WEB_ENV[i]), "in that order");
     }
-    test_check_str(test, worker->env.items[3], S("PORT=3101"), "port: is the first proc's PORT");
+    test_check_str(test, worker->env.items[3], S("PORT=3002"), "port: is the first proc's PORT");
     test_check(test, setup->env.count == 5 && str_equal(setup->env.items[2], S("PORT=4000")),
                "setup gets the env without a PORT of its own");
     test_check(test, admin_web->env.count == 4 && str_equal(admin_web->env.items[1], S("OWN=app")),
@@ -292,7 +292,7 @@ static void config_says_where_an_include_is_wrong(Test *test)
     test_check(test, dir_create_temp(a, S("bprocs-test-"), &dir, &err) == ERR_OK, "a temp dir");
     static const char *const FILES[][2] = {
         { "shop/Procfile", "web: a\nworker: b\n" },
-        { "admin/bprocs.yml", "procs:\n  web: { run: x, port: 3100 }\n" },
+        { "admin/bprocs.yml", "procs:\n  web: { run: x, port: 3001 }\n" },
         { "broken/Procfile", "web: a\nnope\n" },
         { "nested/bprocs.yml", "procs: { web: { run: x } }\ninclude: { shop: {} }\n" },
     };
@@ -308,7 +308,7 @@ static void config_says_where_an_include_is_wrong(Test *test)
         { "include:\n  nested: {}\n", "nested/bprocs.yml: line 2: include: only the config that includes this one sets it" },
         { "include:\n  admin: { port: 3000 }\n", "line 2: include.admin.port: a bprocs.yml sets the ports of its procs itself" },
         { "include:\n  shop: { port: 3000 }\n  admin: {}\n",
-          "line 3: include.admin: port 3100 of admin:web is also the port of shop:worker" },
+          "line 3: include.admin: port 3001 of admin:web is also the port of shop:worker" },
         { "procs:\n  shop: { run: x }\ninclude:\n  shop: {}\n", "line 4: include.shop: there is already a proc called shop" },
         { "include_defaults: { port: 3000 }\ninclude: { shop: {} }\n", "line 1: include_defaults.port: each app sets its own" },
     };

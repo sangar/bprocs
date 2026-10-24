@@ -2,8 +2,8 @@
 # its Procfile. Its needs name its own procs.
 procs:
   web:
-    run: bin/rails server -p 3002
-    port: 3002
+    run: bin/rails server -p 3010
+    port: 3010
     ready: { http: /up }
     restart: on-failure
   worker:

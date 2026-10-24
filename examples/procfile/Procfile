@@ -1,5 +1,5 @@
 # A Procfile, read as foreman reads it: each line is name: command, run in
-# /bin/sh -c with PORT set to 5000 for the first, 5100 for the next and so on.
+# /bin/sh -c with PORT set to 3000 for the first, 3001 for the next and so on.
 # A .env beside it is read too. For needs, checks or restarts, write a bprocs.yml.
 web: bin/rails server -p $PORT
 worker: bundle exec sidekiq
