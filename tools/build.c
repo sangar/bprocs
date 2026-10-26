@@ -59,10 +59,23 @@ static const char *const RELEASE_FLAGS[] = { "-O2", "-DNDEBUG" };
 static const char *const LIBMC_AREAS[] = { "core", "text", "container", "crypto", "platform", "concurrency", "encoding", "log" };
 // libmc's own vendored sources compile in their own standard without the
 // warning flags: their warnings are upstream's to fix.
-static const char *const LIBMC_DEPENDENCIES[] = { "deps/libmc/deps/cyaml", "deps/libmc/deps/yyjson" };
-static const char *const DEPENDENCY_FLAGS[] = { "-std=c11", "-w" };
+static const char *const LIBMC_DEPENDENCIES[] = {
+    "deps/libmc/deps/cyaml", "deps/libmc/deps/yyjson", "deps/libmc/deps/utf8proc",
+    "deps/libmc/deps/md4c",  "deps/libmc/deps/expat/lib",
+};
+// expat finds its config in libmc's src/encoding, and xmltok.c includes the
+// sources in lib/included, which are not compiled alone.
+static const char *const DEPENDENCY_FLAGS[] = {
+    "-std=c11", "-w", "-Ideps/libmc/src/encoding", "-Ideps/libmc/deps/expat/lib/included",
+};
 static const char *const INCLUDE_FLAGS[] = {
-    "-Isrc", "-Ideps/libmc/include", "-Ideps/libmc/deps/cyaml", "-Ideps/libmc/deps/yyjson",
+    "-Isrc",
+    "-Ideps/libmc/include",
+    "-Ideps/libmc/deps/cyaml",
+    "-Ideps/libmc/deps/yyjson",
+    "-Ideps/libmc/deps/utf8proc",
+    "-Ideps/libmc/deps/md4c",
+    "-Ideps/libmc/deps/expat/lib",
 };
 static const char *const SOURCE_DIRECTORIES[] = { "src", "src/platform" };
 static const char *const MAIN_SOURCE = "src/main.c";
