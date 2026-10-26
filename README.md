@@ -23,12 +23,23 @@ It reads a `bprocs.yml`, and a `Procfile` works as it does with foreman.
 - **Themes.** tokyo-night, dracula, nord, gruvbox and catppuccin; `t` cycles through them. Each theme also recolours the programs' own 16 colours.
 - **Small terminals.** `1` to `4` hide the cpu, memory, network and details boxes, as in btop, and give their room to the list and the log. The TUI remembers them in [your own config](#your-own-settings). The layout also drops the system boxes and then the details as the terminal shrinks; the mouse selects and scrolls.
 
-## Usage
+## Install
+
+```sh
+brew install sangar/bprocs/bprocs
+```
+
+Or build it from source, which needs only a C compiler:
 
 ```sh
 cc tools/build.c -o nob     # once
-./nob release
-./out/release/bprocs        # the TUI, starting the daemon first when none runs
+./nob install               # ~/.local/bin/bprocs
+```
+
+## Usage
+
+```sh
+bprocs                      # the TUI, starting the daemon first when none runs
 ```
 
 The config is found in the current directory or the nearest one above it: `bprocs.yml`, `bprocs.yaml`, `Procfile.dev` or `Procfile`, in that order. The `bprocs.yml` in this directory is a demo of harmless processes.
