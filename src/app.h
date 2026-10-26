@@ -12,6 +12,7 @@
 #include "proc.h"
 #include "screen.h"
 #include "stats.h"
+#include "userconfig.h"
 
 typedef enum Focus {
     FOCUS_PROCS,
@@ -71,6 +72,8 @@ typedef struct App {
     Screen *screen;
     ColorMode color_mode;
     Layout layout;
+    unsigned shown_boxes; // the LayoutBox bits the user has not hidden
+    String user_config_path; // where they are remembered
     PtySize pty_size; // what the procs were last told their terminal is
     SystemStats system;
 
@@ -118,7 +121,7 @@ typedef struct App {
 } App;
 
 // app_create takes over client, which app_destroy closes.
-App *app_create(Client *client, size_t theme_index, ColorMode color_mode);
+App *app_create(Client *client, size_t theme_index, ColorMode color_mode, const UserConfig *user_config);
 void app_destroy(App *app);
 // app_run takes over the terminal until the user quits or the daemon has
 // brought everything down at the user's request.

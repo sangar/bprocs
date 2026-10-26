@@ -104,17 +104,29 @@ static void layout_fits_every_size(Test *test)
     for (size_t i = 0; i < countof(sizes); i++) {
         int width = sizes[i][0];
         int height = sizes[i][1];
-        Layout layout = layout_compute(width, height, (size_t)sizes[i][2]);
+        Layout layout = layout_compute(width, height, (size_t)sizes[i][2], BOX_ALL);
         bool fits = inside(layout.procs, width, height) && inside(layout.log, width, height) &&
                     inside(layout.footer, width, height) && !overlap(layout.procs, layout.log) &&
                     layout.footer.y == height - 1 && layout.log.height >= 5;
         fits = fits && (!layout.show_detail || (inside(layout.detail, width, height) &&
                                                  !overlap(layout.detail, layout.procs) &&
                                                  !overlap(layout.detail, layout.log)));
-        fits = fits && (!layout.show_system || (inside(layout.cpu, width, height) && !overlap(layout.cpu, layout.procs)));
+        fits = fits && (!layout.show_cpu || (inside(layout.cpu, width, height) && !overlap(layout.cpu, layout.procs)));
         test_check(test, fits, "the boxes fit side by side");
     }
-    test_check(test, !layout_compute(80, 24, 6).show_system, "a small terminal leaves out the system boxes");
+    test_check(test, !layout_compute(80, 24, 6, BOX_ALL).show_cpu, "a small terminal leaves out the system boxes");
+}
+
+static void hidden_boxes_give_their_room_to_the_rest(Test *test)
+{
+    Layout cpu_only = layout_compute(150, 40, 6, BOX_CPU);
+    test_check(test, cpu_only.show_cpu && !cpu_only.show_memory && !cpu_only.show_network && !cpu_only.show_detail,
+               "only the shown boxes show");
+    test_check(test, cpu_only.cpu.width == 150, "the cpu box takes the width the others left");
+    test_check(test, cpu_only.procs.y + cpu_only.procs.height == cpu_only.footer.y, "the list takes the details' height");
+
+    Layout none = layout_compute(150, 40, 6, 0);
+    test_check(test, none.log.y == 0 && none.log.height == 39, "the log takes the system boxes' height");
 }
 
 static void groups_list_an_apps_procs_under_a_header(Test *test)
@@ -159,6 +171,7 @@ const TestCase SCREEN_TESTS[] = {
     { "graphs_plot_in_braille", graphs_plot_in_braille },
     { "colours_blend_and_map_to_the_palette", colours_blend_and_map_to_the_palette },
     { "layout_fits_every_size", layout_fits_every_size },
+    { "hidden_boxes_give_their_room_to_the_rest", hidden_boxes_give_their_room_to_the_rest },
     { "groups_list_an_apps_procs_under_a_header", groups_list_an_apps_procs_under_a_header },
     { "groups_show_the_proc_most_in_need_of_attention", groups_show_the_proc_most_in_need_of_attention },
     { nullptr, nullptr },

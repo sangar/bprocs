@@ -1,8 +1,10 @@
 #include "test.h"
 
 #include "config.h"
+#include "layout.h"
 #include "mc/platform/platform.h"
 #include "mc/text/path.h"
+#include "userconfig.h"
 
 static const char CONFIG[] = "theme: nord\n"
                              "env: { RAILS_ENV: development, SHARED: top }\n"
@@ -404,6 +406,47 @@ static void config_examples_are_valid(Test *test)
     }
 }
 
+static void user_config_remembers_the_boxes(Test *test)
+{
+    Arena *a = test->arena;
+    Err err = { 0 };
+    String dir;
+    test_check(test, dir_create_temp(a, S("bprocs-test-"), &dir, &err) == ERR_OK, "a temp dir");
+    String path = path_join(a, dir, S("bprocs/config.yml"));
+    UserConfig config;
+    test_check(test, user_config_load(a, path, &config, &err) == ERR_OK && config.boxes == BOX_ALL,
+               "every box shows without a config");
+    test_check(test, user_config_save_boxes(a, path, BOX_CPU | BOX_DETAIL, &err) == ERR_OK, err.msg);
+    test_check(test, user_config_load(a, path, &config, &err) == ERR_OK && config.boxes == (BOX_CPU | BOX_DETAIL),
+               "the saved boxes show");
+
+    test_check(test, file_write_all(path, S("# mine\nboxes: cpu   # btop's 1\n"), 0600, &err) == ERR_OK, "write");
+    test_check(test, user_config_save_boxes(a, path, 0, &err) == ERR_OK, err.msg);
+    String text = S("");
+    test_check(test, file_read_all(a, path, &text, &err) == ERR_OK, "read");
+    test_check_str(test, text, S("# mine\nboxes: \"\"\n"), "only the boxes line changes");
+    test_check(test, user_config_load(a, path, &config, &err) == ERR_OK && config.boxes == 0,
+               "hiding every box is remembered too");
+    test_check(test, dir_remove_all(dir, &err) == ERR_OK, "clean up");
+}
+
+static void user_config_rejects_what_it_does_not_know(Test *test)
+{
+    Arena *a = test->arena;
+    Err err = { 0 };
+    String dir;
+    test_check(test, dir_create_temp(a, S("bprocs-test-"), &dir, &err) == ERR_OK, "a temp dir");
+    String path = path_join(a, dir, S("config.yml"));
+    UserConfig config;
+    test_check(test, file_write_all(path, S("boxes: cpu\nthem: nord\n"), 0600, &err) == ERR_OK, "write");
+    test_check(test, user_config_load(a, path, &config, &err) == ERR_PARSE, "an unknown setting");
+    test_check(test, str_contains(S(err.msg), S("config.yml: line 2: them: unknown setting")), err.msg);
+    test_check(test, file_write_all(path, S("boxes: cpu disk\n"), 0600, &err) == ERR_OK, "write");
+    test_check(test, user_config_load(a, path, &config, &err) == ERR_PARSE, "an unknown box");
+    test_check(test, str_contains(S(err.msg), S("line 1: boxes: no box disk")), err.msg);
+    test_check(test, dir_remove_all(dir, &err) == ERR_OK, "clean up");
+}
+
 const TestCase CONFIG_TESTS[] = {
     { "config_reads_processes_in_order", config_reads_processes_in_order },
     { "config_reads_env_files", config_reads_env_files },
@@ -413,5 +456,7 @@ const TestCase CONFIG_TESTS[] = {
     { "config_says_where_it_is_wrong", config_says_where_it_is_wrong },
     { "config_is_found_above_the_working_directory", config_is_found_above_the_working_directory },
     { "config_examples_are_valid", config_examples_are_valid },
+    { "user_config_remembers_the_boxes", user_config_remembers_the_boxes },
+    { "user_config_rejects_what_it_does_not_know", user_config_rejects_what_it_does_not_know },
     { nullptr, nullptr },
 };

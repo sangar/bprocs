@@ -1094,7 +1094,6 @@ static void draw_help(App *app)
         const char *what;
     } KEYS[] = {
         { "↑ ↓  j k", "select a process, or scroll the log" },
-        { "1 … 9", "select a row by number" },
         { "enter  i", "attach: type into the process" },
         { "h l  ← →", "hide or show an app's processes; enter too" },
         { "ctrl-a", "detach again" },
@@ -1112,6 +1111,7 @@ static void draw_help(App *app)
         { "o", "open http://localhost:port" },
         { "p", "switch to another running project" },
         { "R", "reload the config" },
+        { "1 2 3 4", "hide or show cpu, mem, net, details" },
         { "t", "next colour theme" },
         { "q", "quit, leaving everything running" },
         { "mouse", "click to select, wheel to scroll" },
@@ -1186,12 +1186,14 @@ void ui_draw(App *app)
     Rect all = { 0, 0, screen_width(app->screen), screen_height(app->screen) };
     screen_paint(app->screen, all, theme->background);
     const Layout *layout = &app->layout;
-    if (layout->show_system) {
+    if (layout->show_cpu) {
         draw_cpu(app, layout->cpu);
+    }
+    if (layout->show_memory) {
         draw_memory(app, layout->memory);
-        if (layout->show_network) {
-            draw_network(app, layout->network);
-        }
+    }
+    if (layout->show_network) {
+        draw_network(app, layout->network);
     }
     if (app->view_count > 0) {
         draw_procs(app, layout->procs);

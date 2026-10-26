@@ -21,7 +21,7 @@ It reads a `bprocs.yml`, and a `Procfile` works as it does with foreman.
 - **Restarts.** `restart: on-failure` or `always` starts it again with a growing pause, after a crash, a start that was not ready in time, or a failed health check, and gives up after ten quick failures in a row.
 - **A daemon per project.** The TUI, the CLI and `bprocs run` talk to it over a Unix socket only its user can open. `bprocs ls` and `p` in the TUI list every project that runs on the machine.
 - **Themes.** tokyo-night, dracula, nord, gruvbox and catppuccin; `t` cycles through them. Each theme also recolours the programs' own 16 colours.
-- **Small terminals.** The layout drops the system boxes and then the details as the terminal shrinks; the mouse selects and scrolls.
+- **Small terminals.** `1` to `4` hide the cpu, memory, network and details boxes, as in btop, and give their room to the list and the log. The TUI remembers them in [your own config](#your-own-settings). The layout also drops the system boxes and then the details as the terminal shrinks; the mouse selects and scrolls.
 
 ## Usage
 
@@ -67,7 +67,7 @@ With `--wait`, it stops everything once that proc ends and exits with its exit s
 
 | Keys | |
 |---|---|
-| `↑` `↓` `j` `k`, `1`…`9` | select a row, or scroll the log when it has the focus |
+| `↑` `↓` `j` `k` | select a row, or scroll the log when it has the focus |
 | `enter` `i` / `ctrl-a` | attach to the process and type into it / detach |
 | `h` `l`, `←` `→`, `enter` | hide or show the processes of an app of `include:` |
 | `tab` | move the focus between the list and the log |
@@ -80,6 +80,7 @@ With `--wait`, it stops everything once that proc ends and exits with its exit s
 | `o` | open `http://localhost:<port>` |
 | `p` | switch to another running project |
 | `R` | reload the config; the TUI says when the file changed |
+| `1` `2` `3` `4` | hide or show the cpu, mem, net and details boxes, as in btop; kept in [your own config](#your-own-settings) |
 | `t` | next theme |
 | `?` | help |
 | `q` | quit, leaving everything running |
@@ -211,6 +212,16 @@ include:
 
 Run bprocs from the directory of this config, or with `-C ..` from an app's: inside `shop`, bprocs finds `shop`'s own config first and starts a second daemon, whose ports collide with the first's.
 
+### Your own settings
+
+`~/.config/bprocs/config.yml`, or `$XDG_CONFIG_HOME/bprocs/config.yml`, holds your settings for every project. The TUI writes it as you change them, as btop does with its config, and keeps your comments and the rest of the file:
+
+```yaml
+boxes: cpu mem net details   # the boxes 1 to 4 hide and show; "" for none
+```
+
+An unknown setting or box is an error with its line, as in `bprocs.yml`.
+
 ## Profile
 
 | | |
@@ -241,6 +252,7 @@ Windows is not supported: it has no pseudo-terminals of the POSIX kind, and libm
 |---|---|
 | `src/main.c`, `src/cli.c` | the command line and every command |
 | `src/config.c` | `bprocs.yml` and `Procfile` |
+| `src/userconfig.c` | your own settings, in `~/.config/bprocs/config.yml` |
 | `src/proc.c` | one supervised program: run, read, stop, restart, its log file |
 | `src/supervisor.c` | the procs of a config: needs, checks, restart policies, down in order, reload |
 | `src/check.c` | port, HTTP and command checks |

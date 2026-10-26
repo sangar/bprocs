@@ -168,7 +168,7 @@ static void build_views(App *app)
     app->all.following = true;
 }
 
-App *app_create(Client *client, size_t theme_index, ColorMode color_mode)
+App *app_create(Client *client, size_t theme_index, ColorMode color_mode, const UserConfig *user_config)
 {
     Arena *arena = arena_create(0);
     App *app = arena_push(arena, sizeof *app);
@@ -177,6 +177,8 @@ App *app_create(Client *client, size_t theme_index, ColorMode color_mode)
     app->views_arena = arena_create(0);
     app->client = client;
     app->theme_index = theme_index;
+    app->user_config_path = str_copy(arena, user_config->path);
+    app->shown_boxes = user_config->boxes;
     app->color_mode = color_mode;
     app->daemons_arena = arena_create(0);
     mutex_init(&app->wake_lock);
@@ -408,7 +410,7 @@ static void reconnect(App *app, const char *done)
     }
     app->client = client;
     build_views(app);
-    app->layout = layout_compute(screen_width(app->screen), screen_height(app->screen), app->row_count);
+    app->layout = layout_compute(screen_width(app->screen), screen_height(app->screen), app->row_count, app->shown_boxes);
     if (subscribe(app, &err) != ERR_OK) {
         toast(app, "%s", err.msg);
         return;
@@ -547,7 +549,7 @@ static void resize(App *app)
 {
     TerminalSize size = terminal_size(app->terminal);
     screen_resize(app->screen, size.columns, size.rows);
-    app->layout = layout_compute(size.columns, size.rows, app->row_count);
+    app->layout = layout_compute(size.columns, size.rows, app->row_count, app->shown_boxes);
     send_size(app);
     app->dirty = true;
 }
@@ -586,7 +588,7 @@ static void expand_group(App *app, bool expanded)
     String name = app->groups[group].name;
     build_rows(app);
     select_named(app, name);
-    app->layout = layout_compute(screen_width(app->screen), screen_height(app->screen), app->row_count);
+    app->layout = layout_compute(screen_width(app->screen), screen_height(app->screen), app->row_count, app->shown_boxes);
     send_size(app);
 }
 
@@ -916,7 +918,7 @@ static void switch_project(App *app)
     app->daemon_gone = false;
     app->focus = FOCUS_PROCS;
     build_views(app);
-    app->layout = layout_compute(screen_width(app->screen), screen_height(app->screen), app->row_count);
+    app->layout = layout_compute(screen_width(app->screen), screen_height(app->screen), app->row_count, app->shown_boxes);
     if (subscribe(app, &err) != ERR_OK) {
         toast(app, "%s", err.msg);
         return;
@@ -938,6 +940,19 @@ static void take_switcher_key(App *app, Event event)
     } else if (event.key == KEY_ESCAPE || (event.key == KEY_CHAR && (event.codepoint == 'p' || event.codepoint == 'q'))) {
         app->switching = false;
     }
+}
+
+static void toggle_box(App *app, LayoutBox box, const char *name)
+{
+    app->shown_boxes ^= box;
+    app->layout = layout_compute(screen_width(app->screen), screen_height(app->screen), app->row_count, app->shown_boxes);
+    send_size(app);
+    Err err = { 0 };
+    if (user_config_save_boxes(app->frame, app->user_config_path, app->shown_boxes, &err) != ERR_OK) {
+        toast(app, "%s", err.msg);
+        return;
+    }
+    toast(app, app->shown_boxes & box ? "%s · shown" : "%s · hidden", name);
 }
 
 static void next_theme(App *app)
@@ -1041,10 +1056,19 @@ static void handle_char(App *app, uint32_t c)
     case 't':
         next_theme(app);
         return;
+    case '1':
+        toggle_box(app, BOX_CPU, "cpu");
+        return;
+    case '2':
+        toggle_box(app, BOX_MEMORY, "mem");
+        return;
+    case '3':
+        toggle_box(app, BOX_NETWORK, "net");
+        return;
+    case '4':
+        toggle_box(app, BOX_DETAIL, "details");
+        return;
     default:
-        if (c >= '1' && c <= '9') {
-            select_row(app, (size_t)(c - '1'));
-        }
         return;
     }
 }

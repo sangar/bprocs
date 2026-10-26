@@ -242,6 +242,12 @@ static int run_tui(Arena *arena, const Options *options)
     if (!terminal_is_terminal(STANDARD_OUTPUT)) {
         return fail("the TUI needs a terminal · bprocs up starts the procs without one, bprocs run runs them here");
     }
+    UserConfig user_config;
+    Err err = { 0 };
+    if (user_config_load(arena, user_config_path(arena), &user_config, &err) != ERR_OK) {
+        fprintf(stderr, "bprocs: %s\n", err.msg);
+        return EXIT_USAGE;
+    }
     Client *client;
     bool started;
     int status = connect_daemon(arena, options, true, &client, &started);
@@ -261,8 +267,7 @@ static int run_tui(Arena *arena, const Options *options)
     ColorMode mode = options->force_256    ? COLOR_256
                      : options->force_true ? COLOR_TRUE
                                            : terminal_color_mode(arena);
-    App *app = app_create(client, theme_index, mode);
-    Err err = { 0 };
+    App *app = app_create(client, theme_index, mode, &user_config);
     Error ran = app_run(app, &err);
     app_destroy(app);
     return ran == ERR_OK ? EXIT_OK : fail("%s", err.msg);
