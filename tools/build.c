@@ -56,7 +56,7 @@ static const char *const WARNING_FLAGS[] = {
 };
 static const char *const DEBUG_FLAGS[] = { "-g", "-O0", "-fsanitize=address,undefined", "-fno-omit-frame-pointer" };
 static const char *const RELEASE_FLAGS[] = { "-O2" };
-static const char *const LIBMC_AREAS[] = { "core", "text", "container", "crypto", "platform", "concurrency", "encoding", "log" };
+static const char *const LIBMC_AREAS[] = { "core", "text", "container", "crypto", "platform", "concurrency", "encoding", "log", "term" };
 // libmc's own vendored sources compile in their own standard without the
 // warning flags: their warnings are upstream's to fix.
 static const char *const LIBMC_DEPENDENCIES[] = {

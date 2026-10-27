@@ -2,7 +2,8 @@
 
 #include <stdio.h>
 
-#include "logbuf.h"
+#include "mc/term/logbuf.h"
+#include "mc/term/ansi.h"
 #include "mc/platform/platform.h"
 #include "mc/platform/terminal.h"
 #include "protocol.h"
@@ -59,7 +60,7 @@ static void print_new_lines(Runner *runner)
             ArenaMark mark = arena_mark(runner->scratch);
             String line = logbuf_line(log, n);
             write_prefixed(runner, name, color, runner->options.plain || !runner->color
-                                                    ? logbuf_plain(runner->scratch, line)
+                                                    ? ansi_strip(runner->scratch, line)
                                                     : line);
             arena_release(mark);
         }

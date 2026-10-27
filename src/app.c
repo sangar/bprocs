@@ -3,6 +3,7 @@
 #include <string.h>
 
 #include "mc/text/path.h"
+#include "mc/term/ansi.h"
 #include "protocol.h"
 #include "theme.h"
 #include "ui.h"
@@ -168,7 +169,7 @@ static void build_views(App *app)
     app->all.following = true;
 }
 
-App *app_create(Client *client, size_t theme_index, ColorMode color_mode, const UserConfig *user_config)
+App *app_create(Client *client, size_t theme_index, ColorDepth color_depth, const UserConfig *user_config)
 {
     Arena *arena = arena_create(0);
     App *app = arena_push(arena, sizeof *app);
@@ -179,7 +180,7 @@ App *app_create(Client *client, size_t theme_index, ColorMode color_mode, const 
     app->theme_index = theme_index;
     app->user_config_path = str_copy(arena, user_config->path);
     app->shown_boxes = user_config->boxes;
-    app->color_mode = color_mode;
+    app->color_depth = color_depth;
     app->daemons_arena = arena_create(0);
     mutex_init(&app->wake_lock);
     atomic_init(&app->stop_signal, false);
@@ -290,7 +291,7 @@ bool app_matches(App *app, String line)
         return false;
     }
     ArenaMark mark = arena_mark(app->frame);
-    bool found = str_contains(str_lower_ascii(app->frame, logbuf_plain(app->frame, line)),
+    bool found = str_contains(str_lower_ascii(app->frame, ansi_strip(app->frame, line)),
                               str_lower_ascii(app->frame, app_search(app)));
     arena_release(mark);
     return found;
@@ -1412,7 +1413,7 @@ Error app_run(App *app, Err *err)
         return watching;
     }
     write_out(app, S(ENTER_SCREEN));
-    app->screen = screen_create(app->color_mode);
+    app->screen = screen_create(app->color_depth);
     app->now_ns = clock_monotonic_ns();
     app->started_ns = app->now_ns;
     app->next_sample_ns = app->now_ns;

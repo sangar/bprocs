@@ -1,6 +1,6 @@
 #pragma once
 
-#include "screen.h"
+#include "mc/term/screen.h"
 
 // LayoutBox is a box the user can hide, a bit of the set layout_compute shows.
 typedef enum LayoutBox {

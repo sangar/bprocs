@@ -113,6 +113,9 @@ bool file_find_upward(Arena *arena, String directory, StringList names, String *
 [[nodiscard]] Error file_remove(String path, Err *err);
 [[nodiscard]] Error file_set_mtime(String path, int64_t mtime_ns, Err *err);
 
+// file_read_to_end reads fd until its end into the arena, NUL-terminated,
+// such as a file or standard input from a pipe.
+[[nodiscard]] Error file_read_to_end(Arena *arena, int fd, String *contents, Err *err);
 // file_read_all reads the whole file into the arena, NUL-terminated.
 [[nodiscard]] Error file_read_all(Arena *arena, String path, String *contents, Err *err);
 [[nodiscard]] Error file_write_all(String path, String contents, unsigned mode, Err *err);
@@ -254,7 +257,8 @@ void signal_watch_stop(SignalWatch *watch);
 
 // ---- network ----
 
-// net_listen binds host:port, all interfaces when host is empty, and listens.
+// net_listen binds host:port and listens. An empty host is every interface,
+// IPv6 and IPv4 on one socket where the system has IPv6, IPv4 alone where not.
 [[nodiscard]] Error net_listen(String address, int *fd, Err *err);
 // net_local_address is the host:port fd is bound to, with the port chosen
 // when it listened on port 0, in the form net_listen and net_connect take.
@@ -290,3 +294,25 @@ void net_close(int fd);
 // net_shutdown ends both directions of fd, which wakes a thread blocked in
 // net_receive on it. The descriptor stays open until net_close.
 void net_shutdown(int fd);
+
+// NetResult is how far a call that does not wait got, for event loops on
+// mc/platform/poll.h.
+typedef enum NetResult {
+    NET_DONE,        // some bytes moved
+    NET_WOULD_BLOCK, // none can move until the socket is ready
+    NET_CLOSED,      // the peer closed, or the connection failed
+} NetResult;
+
+// net_set_nonblocking makes calls on fd return instead of waiting, as a
+// listener for net_try_accept needs.
+[[nodiscard]] Error net_set_nonblocking(int fd, Err *err);
+// net_try_accept takes a connection that is already waiting and reports
+// whether there was one. The connection is non-blocking, never raises
+// SIGPIPE, and over TCP sends without Nagle's delay.
+bool net_try_accept(int listener, int *client);
+// net_try_receive reads up to capacity bytes that have arrived. Unlike
+// net_receive_nowait it tells a peer that closed from one that is quiet.
+NetResult net_try_receive(int fd, void *buffer, size_t capacity, size_t *got);
+// net_try_send writes what of data the socket takes now. On a socket libmc
+// opened or accepted it never raises SIGPIPE.
+NetResult net_try_send(int fd, String data, size_t *sent);

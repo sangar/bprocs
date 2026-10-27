@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include "mc/concurrency/outbox.h"
+#include "mc/term/ansi.h"
 #include "mc/concurrency/queue.h"
 #include "mc/concurrency/waker.h"
 #include "mc/platform/frame.h"
@@ -454,11 +455,11 @@ static String log_text(Arena *arena, const LogBuffer *log, int64_t lines, bool p
     StringBuilder out = str_builder_create(arena, 4096);
     for (uint64_t n = first; n < end; n++) {
         String line = logbuf_line(log, n);
-        str_builder_append(&out, plain ? logbuf_plain(arena, line) : line);
+        str_builder_append(&out, plain ? ansi_strip(arena, line) : line);
         str_builder_append_char(&out, '\n');
     }
     String partial = logbuf_partial(log);
-    str_builder_append(&out, plain ? logbuf_plain(arena, partial) : partial);
+    str_builder_append(&out, plain ? ansi_strip(arena, partial) : partial);
     return str_builder_finish(&out);
 }
 

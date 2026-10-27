@@ -8,7 +8,8 @@
 #include "config.h"
 #include "daemon.h"
 #include "format.h"
-#include "logbuf.h"
+#include "mc/term/logbuf.h"
+#include "mc/term/ansi.h"
 #include "mc/concurrency/waker.h"
 #include "mc/platform/platform.h"
 #include "mc/platform/terminal.h"
@@ -203,24 +204,24 @@ static int request(Client *client, Arena *arena, Node *message, Node **reply, St
 
 // ---- the TUI ----
 
-static ColorMode terminal_color_mode(Arena *arena)
+static ColorDepth terminal_color_depth(Arena *arena)
 {
     String value;
     if (env_get(arena, S("COLORTERM"), &value) && (str_equal(value, S("truecolor")) || str_equal(value, S("24bit")))) {
-        return COLOR_TRUE;
+        return COLOR_DEPTH_TRUE;
     }
     if (env_get(arena, S("TERM_PROGRAM"), &value) && str_equal(value, S("Apple_Terminal"))) {
-        return COLOR_256;
+        return COLOR_DEPTH_256;
     }
     static const char *const TRUE_COLOR_TERMS[] = { "kitty", "ghostty", "wezterm", "alacritty", "foot", "direct" };
     if (env_get(arena, S("TERM"), &value)) {
         for (size_t i = 0; i < countof(TRUE_COLOR_TERMS); i++) {
             if (str_contains(value, S(TRUE_COLOR_TERMS[i]))) {
-                return COLOR_TRUE;
+                return COLOR_DEPTH_TRUE;
             }
         }
     }
-    return COLOR_256;
+    return COLOR_DEPTH_256;
 }
 
 static bool choose_theme(String name, size_t *index)
@@ -264,9 +265,9 @@ static int run_tui(Arena *arena, const Options *options)
         client_close(client);
         return status != EXIT_OK ? status : EXIT_USAGE;
     }
-    ColorMode mode = options->force_256    ? COLOR_256
-                     : options->force_true ? COLOR_TRUE
-                                           : terminal_color_mode(arena);
+    ColorDepth mode = options->force_256    ? COLOR_DEPTH_256
+                     : options->force_true ? COLOR_DEPTH_TRUE
+                                           : terminal_color_depth(arena);
     App *app = app_create(client, theme_index, mode, &user_config);
     Error ran = app_run(app, &err);
     app_destroy(app);
@@ -472,7 +473,7 @@ static void print_lines(Arena *arena, const LogBuffer *log, uint64_t *printed, b
     for (uint64_t n = *printed > first ? *printed : first; n < logbuf_end(log); n++) {
         ArenaMark mark = arena_mark(arena);
         String line = logbuf_line(log, n);
-        line = plain ? logbuf_plain(arena, line) : line;
+        line = plain ? ansi_strip(arena, line) : line;
         printf("%.*s%s\n", (int)line.len, line.data, plain ? "" : "\x1b[0m");
         arena_release(mark);
     }

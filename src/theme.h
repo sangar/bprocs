@@ -1,6 +1,6 @@
 #pragma once
 
-#include "color.h"
+#include "mc/term/color.h"
 
 enum { THEME_ACCENTS = 8 };
 

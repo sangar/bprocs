@@ -2,9 +2,10 @@
 
 #include <math.h>
 
-#include "draw.h"
+#include "mc/term/ansi.h"
+#include "mc/term/draw.h"
+#include "mc/text/utf8.h"
 #include "format.h"
-#include "logview.h"
 #include "theme.h"
 
 static const float INTRO_MS = 700.0f;
@@ -58,16 +59,24 @@ static float ease_out(float t)
 }
 
 // wave runs between 0 and 1 once a period, shifted by phase periods.
+// spinner_glyph is the frame of a braille spinner at time now_ns.
+static uint32_t spinner_glyph(int64_t now_ns)
+{
+    static const uint32_t FRAMES[] = { 0x280B, 0x2819, 0x2839, 0x2838, 0x283C, 0x2834, 0x2826, 0x2827, 0x2807, 0x280F };
+    int64_t frame = now_ns / (80 * NS_PER_MILLISECOND);
+    return FRAMES[(size_t)(frame % (int64_t)countof(FRAMES))];
+}
+
 static float wave(const App *app, int period_ms, float phase)
 {
     float t = (float)(app->now_ns / NS_PER_MILLISECOND % period_ms) / (float)period_ms;
     return 0.5f + 0.5f * sinf((t - phase) * TAU);
 }
 
-static Box box_style(const App *app, String title, Rgb title_color, String info, Rgb info_color, bool focused)
+static Panel panel_style(const App *app, String title, Rgb title_color, String info, Rgb info_color, bool focused)
 {
     const Theme *theme = current_theme(app);
-    return (Box) {
+    return (Panel) {
         .title = title,
         .title_color = title_color,
         .info = info,
@@ -107,7 +116,7 @@ static void draw_cpu(App *app, Rect rect)
     const Theme *theme = current_theme(app);
     const SystemStats *stats = &app->system;
     String info = str_format(app->frame, "load %.2f %.2f %.2f", stats->load[0], stats->load[1], stats->load[2]);
-    draw_box(app->screen, rect, box_style(app, S("cpu"), theme->text, info, theme->muted, false));
+    draw_panel(app->screen, rect, panel_style(app, S("cpu"), theme->text, info, theme->muted, false));
     Rect inner = rect_inner(rect);
     if (inner.width < 12 || inner.height < 1) {
         return;
@@ -153,7 +162,7 @@ static void draw_memory(App *app, Rect rect)
     const SystemStats *stats = &app->system;
     float share = history_newest(&stats->memory);
     String info = str_format(app->frame, "%.0f%%", (double)share * 100.0);
-    draw_box(app->screen, rect, box_style(app, S("mem"), theme->text, info, gradient_at(theme->memory, share), false));
+    draw_panel(app->screen, rect, panel_style(app, S("mem"), theme->text, info, gradient_at(theme->memory, share), false));
     Rect inner = rect_inner(rect);
     if (inner.width < 12 || inner.height < 2) {
         return;
@@ -176,7 +185,7 @@ static void draw_network(App *app, Rect rect)
 {
     const Theme *theme = current_theme(app);
     const SystemStats *stats = &app->system;
-    draw_box(app->screen, rect, box_style(app, S("net"), theme->text, S(""), theme->muted, false));
+    draw_panel(app->screen, rect, panel_style(app, S("net"), theme->text, S(""), theme->muted, false));
     Rect inner = rect_inner(rect);
     if (inner.width < 8 || inner.height < 2) {
         return;
@@ -428,7 +437,7 @@ static void draw_proc_row(App *app, Rect inner, Columns columns, int y, size_t r
     }
     String name = indent > 0 ? group_short_name(spec->name) : spec->name;
     int name_width = columns.name_width - indent;
-    screen_text(app->screen, columns.name_x + indent, y, name_width, text_fit(name, name_width), name_color,
+    screen_text(app->screen, columns.name_x + indent, y, name_width, name, name_color,
                 selected ? ATTR_BOLD : 0);
     if (columns.port && spec->port > 0) {
         screen_text(app->screen, columns.port_x, y, PORT_WIDTH, str_format(app->frame, ":%d", spec->port),
@@ -437,7 +446,7 @@ static void draw_proc_row(App *app, Rect inner, Columns columns, int y, size_t r
     draw_usage(app, columns, y, &view->stats, active);
     if (columns.status) {
         Rgb color;
-        String word = text_fit(status_word(app, status, &color), STATUS_WIDTH);
+        String word = ansi_truncate(status_word(app, status, &color), STATUS_WIDTH);
         draw_text_right(app->screen, columns.status_x + STATUS_WIDTH, y, word, color, 0);
     }
 }
@@ -500,12 +509,12 @@ static void draw_header(App *app, Rect inner, Columns columns, int y, size_t row
         name_color = rgb_mix(name_color, theme->muted, 0.55f);
     }
     int name_width = columns.name_width - GROUP_INDENT;
-    screen_text(app->screen, columns.name_x + GROUP_INDENT, y, name_width, text_fit(g->name, name_width), name_color,
+    screen_text(app->screen, columns.name_x + GROUP_INDENT, y, name_width, g->name, name_color,
                 ATTR_BOLD);
     draw_usage(app, columns, y, &view->stats, active > 0);
     if (columns.status) {
         Rgb color;
-        String word = text_fit(group_word(app, group, &color), STATUS_WIDTH);
+        String word = ansi_truncate(group_word(app, group, &color), STATUS_WIDTH);
         draw_text_right(app->screen, columns.status_x + STATUS_WIDTH, y, word, color, 0);
     }
 }
@@ -561,7 +570,7 @@ static void draw_procs(App *app, Rect rect)
     }
     String info = str_format(app->frame, "%zu/%zu up", running, app->view_count);
     bool focused = app->focus == FOCUS_PROCS;
-    draw_box(app->screen, rect, box_style(app, S("procs"), theme->text, info, theme->running, focused));
+    draw_panel(app->screen, rect, panel_style(app, S("procs"), theme->text, info, theme->running, focused));
     Rect inner = rect_inner(rect);
     if (inner.width < NAME_MIN || inner.height < 2) {
         return;
@@ -582,7 +591,7 @@ static void draw_procs(App *app, Rect rect)
 static int draw_fact(App *app, int x, int y, int end, String label, String value)
 {
     const Theme *theme = current_theme(app);
-    int width = text_columns(label) + 1 + text_columns(value);
+    int width = (int)utf8_width(label) + 1 + (int)utf8_width(value);
     if (x + width > end) {
         return x;
     }
@@ -690,11 +699,11 @@ static void draw_bottom_line(App *app, Rect inner, const char *problem, String t
     int bottom = inner.y + inner.height - 1;
     if (problem[0] != '\0') {
         String line = str_format(app->frame, "✖ %s", problem);
-        screen_text(app->screen, inner.x + 1, bottom, inner.width - 2, text_fit(line, inner.width - 2), theme->failed,
+        screen_text(app->screen, inner.x + 1, bottom, inner.width - 2, line, theme->failed,
                     0);
         return;
     }
-    screen_text(app->screen, inner.x + 1, bottom, inner.width - 2, text_fit(text, inner.width - 2),
+    screen_text(app->screen, inner.x + 1, bottom, inner.width - 2, text,
                 rgb_mix(theme->muted, theme->text, 0.2f), ATTR_ITALIC);
 }
 
@@ -705,7 +714,7 @@ static void draw_proc_detail(App *app, Rect rect, size_t index)
     ProcStatus status = view->status;
     Rgb state_color;
     String state = state_label(app, index, &state_color);
-    draw_box(app->screen, rect, box_style(app, spec->name, app_accent(app, index), state, state_color, false));
+    draw_panel(app->screen, rect, panel_style(app, spec->name, app_accent(app, index), state, state_color, false));
     Rect inner = rect_inner(rect);
     if (inner.width < 20 || inner.height < 3) {
         return;
@@ -753,7 +762,7 @@ static void draw_group_detail(App *app, Rect rect, size_t group)
         state = str_format(app->frame, "%zu/%zu up", up, g->count);
         state_color = up == g->count ? theme->running : theme->muted;
     }
-    draw_box(app->screen, rect, box_style(app, g->name, app_accent(app, g->first), state, state_color, false));
+    draw_panel(app->screen, rect, panel_style(app, g->name, app_accent(app, g->first), state, state_color, false));
     Rect inner = rect_inner(rect);
     if (inner.width < 20 || inner.height < 3) {
         return;
@@ -817,16 +826,21 @@ static void highlight_matches(App *app, Rect area, int y, int rows)
     }
 }
 
+static TextStyle log_style(const Theme *theme)
+{
+    return (TextStyle) { .fg = theme->text, .ansi = theme->ansi };
+}
+
 // draw_log_line puts line just above what is drawn so far, or as much of
 // its bottom as fits, and returns the row it starts on.
 static int draw_log_line(LogCanvas *canvas, String line)
 {
-    const Theme *theme = current_theme(canvas->app);
-    int rows = log_line_rows(line, canvas->area.width);
+    int rows = wrapped_rows(line, canvas->area.width);
     int skip = rows > canvas->remaining ? rows - canvas->remaining : 0;
     int shown = rows - skip;
     int y = canvas->area.y + canvas->remaining - shown;
-    log_line_draw(canvas->app->screen, canvas->area.x, y, canvas->area.width, skip, shown, line, theme);
+    Rect rect = { canvas->area.x, y, canvas->area.width, shown };
+    screen_wrapped(canvas->app->screen, rect, skip, line, log_style(current_theme(canvas->app)));
     highlight_matches(canvas->app, canvas->area, y, shown);
     canvas->remaining -= shown;
     return y - skip;
@@ -850,9 +864,11 @@ static uint64_t draw_log_from_top(App *app, const LogBuffer *log, Rect area, uin
         if (!shown(app, line)) {
             continue;
         }
-        log_line_draw(app->screen, area.x, y, area.width, 0, bottom - y, line, current_theme(app));
-        highlight_matches(app, area, y, log_line_rows(line, area.width));
-        y += log_line_rows(line, area.width);
+        Rect rect = { area.x, y, area.width, bottom - y };
+        screen_wrapped(app->screen, rect, 0, line, log_style(current_theme(app)));
+        int rows = wrapped_rows(line, area.width);
+        highlight_matches(app, area, y, rows);
+        y += rows;
         last = n;
     }
     return last;
@@ -863,7 +879,7 @@ static void draw_cursor(App *app, Rect area, int line_y, String partial)
     const Theme *theme = current_theme(app);
     int row;
     int column;
-    log_line_end(partial, area.width, &row, &column);
+    wrapped_end(partial, area.width, &row, &column);
     Cell *cell = screen_cell(app->screen, area.x + column, line_y + row);
     bool visible = (app->now_ns / NS_PER_MILLISECOND / (BLINK_MS / 2)) % 2 == 0;
     if (cell != nullptr && line_y + row < area.y + area.height && visible) {
@@ -926,12 +942,12 @@ static void draw_log(App *app, Rect rect)
     String info = log_info(app, view, end, &info_color);
     String title = str_format(app->frame, "log · %.*s", (int)spec->name.len, spec->name.data);
     Rgb title_color = app->show_all ? theme->text : app_accent(app, app->rows[app->selected].proc);
-    Box box = box_style(app, title, title_color, info, info_color, focused);
+    Panel box = panel_style(app, title, title_color, info, info_color, focused);
     if (attached) {
         box.glow = rgb_mix(theme->highlight, theme->focus, wave(app, PULSE_MS, 0.0f));
         box.border = rgb_mix(box.glow, theme->border, 0.5f);
     }
-    draw_box(app->screen, rect, box);
+    draw_panel(app->screen, rect, box);
     Rect inner = rect_inner(rect);
     if (inner.width < 4 || inner.height < 1) {
         return;
@@ -964,7 +980,7 @@ static void draw_log(App *app, Rect rect)
         String text = app->show_all                       ? S("lines of every process show here as they come")
                       : app->rows[app->selected].header ? S("lines of its processes show here as they come")
                                                         : placeholder(status);
-        int x = area.x + (area.width - text_columns(text)) / 2;
+        int x = area.x + (area.width - (int)utf8_width(text)) / 2;
         screen_text(app->screen, x, area.y + area.height / 2, area.width, text, theme->muted, ATTR_ITALIC);
     }
     size_t total = (size_t)(end - first);
@@ -991,7 +1007,7 @@ static void draw_brand(App *app, int x, int y)
 static int draw_hint(App *app, int x, int y, int end, const char *key, const char *label)
 {
     const Theme *theme = current_theme(app);
-    int width = text_columns(S(key)) + 1 + text_columns(S(label));
+    int width = (int)utf8_width(S(key)) + 1 + (int)utf8_width(S(label));
     if (x + width > end) {
         return end;
     }
@@ -1012,13 +1028,13 @@ static void draw_footer(App *app, Rect rect)
     int x = rect.x + 1;
     if (app->focus == FOCUS_INPUT) {
         String pill = S(" ATTACHED ");
-        int width = text_columns(pill);
+        int width = (int)utf8_width(pill);
         screen_paint(app->screen, (Rect) { x, rect.y, width, 1 }, theme->highlight);
         screen_text(app->screen, x, rect.y, width, pill, theme->background, ATTR_BOLD);
         x += width + 1;
         const ProcSpec *spec = &app_selected_view(app)->spec;
         String text = str_format(app->frame, "keys go to %.*s · ctrl-a detaches", (int)spec->name.len, spec->name.data);
-        screen_text(app->screen, x, rect.y, end - x, text_fit(text, end - x), theme->text, 0);
+        screen_text(app->screen, x, rect.y, end - x, text, theme->text, 0);
         return;
     }
     if (app->typing_search) {
@@ -1035,7 +1051,7 @@ static void draw_footer(App *app, Rect rect)
     }
     if (app->daemon_gone) {
         String pill = S(" DAEMON STOPPED ");
-        int width = text_columns(pill);
+        int width = (int)utf8_width(pill);
         screen_paint(app->screen, (Rect) { x, rect.y, width, 1 }, theme->failed);
         screen_text(app->screen, x, rect.y, width, pill, theme->background, ATTR_BOLD);
         x += width + 1;
@@ -1066,15 +1082,15 @@ static void draw_toast(App *app)
     float fade_out = (TOAST_MS - age) / TOAST_FADE_OUT_MS;
     float alpha = ease_out(fminf(fminf(fade_in, fade_out), 1.0f));
     String text = { app->toast, app->toast_len };
-    int width = text_columns(text) + 4;
+    int width = (int)utf8_width(text) + 4;
     int screen_w = screen_width(app->screen);
     width = width > screen_w - 2 ? screen_w - 2 : width;
     Rect rect = { screen_w - width - 1, app->layout.footer.y - 3, width, 3 };
     Rgb background = rgb_mix(theme->background, theme->surface, alpha);
     screen_paint(app->screen, rect, background);
     Rgb border = rgb_mix(theme->background, theme->focus, alpha);
-    draw_box(app->screen, rect, (Box) { .border = rgb_mix(background, border, 0.6f), .glow = border });
-    screen_text(app->screen, rect.x + 2, rect.y + 1, width - 4, text_fit(text, width - 4),
+    draw_panel(app->screen, rect, (Panel) { .border = rgb_mix(background, border, 0.6f), .glow = border });
+    screen_text(app->screen, rect.x + 2, rect.y + 1, width - 4, text,
                 rgb_mix(theme->background, theme->text, alpha), 0);
 }
 
@@ -1121,8 +1137,8 @@ static void draw_help(App *app)
     screen_shade(app->screen, all, 0.35f);
     Rect rect = centered(app, 58, (int)countof(KEYS) + 4);
     screen_paint(app->screen, rect, theme->surface);
-    draw_box(app->screen, rect,
-             box_style(app, S("keys"), theme->text, S(current_theme(app)->name), theme->muted, true));
+    draw_panel(app->screen, rect,
+             panel_style(app, S("keys"), theme->text, S(current_theme(app)->name), theme->muted, true));
     for (size_t i = 0; i < countof(KEYS); i++) {
         int y = rect.y + 2 + (int)i;
         screen_text(app->screen, rect.x + 3, y, 12, S(KEYS[i].keys), theme->highlight, ATTR_BOLD);
@@ -1138,7 +1154,7 @@ static void draw_switcher(App *app)
     int rows = app->daemon_count > 0 ? (int)app->daemon_count : 1;
     Rect rect = centered(app, 72, rows + 4);
     screen_paint(app->screen, rect, theme->surface);
-    draw_box(app->screen, rect, box_style(app, S("projects"), theme->text, S("⏎ switch · esc"), theme->muted, true));
+    draw_panel(app->screen, rect, panel_style(app, S("projects"), theme->text, S("⏎ switch · esc"), theme->muted, true));
     if (app->daemon_count == 0) {
         screen_text(app->screen, rect.x + 3, rect.y + 2, rect.width - 6, S("no daemon runs"), theme->muted, ATTR_ITALIC);
         return;
@@ -1154,7 +1170,7 @@ static void draw_switcher(App *app)
         String count = str_format(app->frame, "%zu/%zu up", daemon->running, daemon->total);
         int right = draw_text_right(app->screen, rect.x + rect.width - 3, y, count, theme->muted, 0);
         bool current = str_equal(daemon->config_path, app->config_path);
-        screen_text(app->screen, rect.x + 3, y, right - rect.x - 5, text_fit(daemon->config_path, right - rect.x - 5),
+        screen_text(app->screen, rect.x + 3, y, right - rect.x - 5, daemon->config_path,
                     current ? theme->highlight : theme->text, selected ? ATTR_BOLD : 0);
     }
 }
@@ -1170,7 +1186,7 @@ static void draw_going_down(App *app)
     screen_shade(app->screen, all, 0.5f);
     Rect rect = centered(app, 46, 6);
     screen_paint(app->screen, rect, theme->surface);
-    draw_box(app->screen, rect, box_style(app, S("down"), theme->text, S(""), theme->muted, true));
+    draw_panel(app->screen, rect, panel_style(app, S("down"), theme->text, S(""), theme->muted, true));
     String text = str_format(app->frame, "stopping %zu of %zu processes", left, app->down_total);
     screen_glyph(app->screen, rect.x + 3, rect.y + 2, spinner_glyph(app->now_ns), theme->starting, 0);
     screen_text(app->screen, rect.x + 5, rect.y + 2, rect.width - 8, text, theme->text, 0);

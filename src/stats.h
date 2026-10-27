@@ -1,6 +1,6 @@
 #pragma once
 
-#include "history.h"
+#include "mc/term/history.h"
 #include "mc/platform/sysinfo.h"
 
 // SystemStats is the history of the machine, one sample a second.

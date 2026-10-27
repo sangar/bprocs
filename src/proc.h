@@ -1,7 +1,7 @@
 #pragma once
 
 #include "config.h"
-#include "logbuf.h"
+#include "mc/term/logbuf.h"
 
 // Proc is one supervised program: it starts the program on a terminal of its
 // own, collects its output on a reader thread, stops it, restarts it, and

@@ -4,13 +4,13 @@
 
 #include "client.h"
 #include "group.h"
-#include "input.h"
+#include "mc/term/input.h"
 #include "layout.h"
-#include "logbuf.h"
+#include "mc/term/logbuf.h"
 #include "mc/platform/platform.h"
 #include "mc/platform/terminal.h"
 #include "proc.h"
-#include "screen.h"
+#include "mc/term/screen.h"
 #include "stats.h"
 #include "userconfig.h"
 
@@ -70,7 +70,7 @@ typedef struct App {
 
     Terminal *terminal;
     Screen *screen;
-    ColorMode color_mode;
+    ColorDepth color_depth;
     Layout layout;
     unsigned shown_boxes; // the LayoutBox bits the user has not hidden
     String user_config_path; // where they are remembered
@@ -121,7 +121,7 @@ typedef struct App {
 } App;
 
 // app_create takes over client, which app_destroy closes.
-App *app_create(Client *client, size_t theme_index, ColorMode color_mode, const UserConfig *user_config);
+App *app_create(Client *client, size_t theme_index, ColorDepth color_depth, const UserConfig *user_config);
 void app_destroy(App *app);
 // app_run takes over the terminal until the user quits or the daemon has
 // brought everything down at the user's request.

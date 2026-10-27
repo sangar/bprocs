@@ -272,13 +272,9 @@ Windows is not supported: it has no pseudo-terminals of the POSIX kind, and libm
 | `src/client.c`, `src/protocol.c` | connecting to a daemon, and its messages |
 | `src/app.c` | the TUI: input, the daemon's events, frames |
 | `src/ui.c` | drawing every box from the app's state |
-| `src/screen.c` | the cell grid and the diffing renderer |
-| `src/draw.c` | boxes, meters, braille graphs, sparklines |
-| `src/logbuf.c`, `src/logview.c` | terminal output into lines, and lines onto the screen |
-| `src/input.c` | keys, mouse and paste from the terminal's bytes |
-| `src/stats.c`, `src/layout.c`, `src/theme.c`, `src/color.c` | the rest of the picture |
+| `src/stats.c`, `src/layout.c`, `src/theme.c`, `src/format.c` | the rest of the picture |
 
-From libmc come the pseudo-terminals and statistics (`mc/platform/pty.h`, `mc/platform/sysinfo.h`), starting the daemon (`process_spawn_detached`, `file_lock`, `file_try_lock`), the socket's frames and the daemon's outboxes (`mc/platform/frame.h`, `mc/concurrency/outbox.h`, `mc/concurrency/waker.h`), signals (`SignalWatch`), log files (`mc/log/logfile.h`), `.env` files (`mc/encoding/dotenv.h`), and the runtime directory and the search for the config (`dir_runtime`, `file_find_upward`).
+From libmc come the pseudo-terminals and statistics (`mc/platform/pty.h`, `mc/platform/sysinfo.h`), starting the daemon (`process_spawn_detached`, `file_lock`, `file_try_lock`), the socket's frames and the daemon's outboxes (`mc/platform/frame.h`, `mc/concurrency/outbox.h`, `mc/concurrency/waker.h`), signals (`SignalWatch`), log files (`mc/log/logfile.h`), `.env` files (`mc/encoding/dotenv.h`), the runtime directory and the search for the config (`dir_runtime`, `file_find_upward`), and the terminal: the cell grid, panels, meters and graphs, colours, keys and mouse, and output into lines (`mc/term`).
 
 The daemon of a config keeps its socket, locks and log in a directory only its user can open: `$XDG_RUNTIME_DIR/bprocs` where that is set, as on most Linux systems, else `bprocs-<uid>` in `$TMPDIR` or `/tmp`. They are named after a hash of the config's path. The daemon holds the lock for as long as it runs, so a second daemon or `bprocs run` for the same config refuses to start. Its log is where to look when it does not start.
 

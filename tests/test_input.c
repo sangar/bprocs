@@ -1,6 +1,6 @@
 #include "test.h"
 
-#include "input.h"
+#include "mc/term/input.h"
 
 static Event decode(Test *test, const char *bytes, size_t *used)
 {

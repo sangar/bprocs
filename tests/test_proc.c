@@ -1,6 +1,7 @@
 #include "test.h"
 
 #include "mc/platform/platform.h"
+#include "mc/term/ansi.h"
 #include "mc/text/path.h"
 #include "proc.h"
 
@@ -42,7 +43,7 @@ static bool log_contains(Test *test, Proc *proc, const char *text)
     proc_lock(proc);
     const LogBuffer *log = proc_log(proc);
     for (uint64_t n = logbuf_first(log); n < logbuf_end(log) && !found; n++) {
-        found = str_contains(logbuf_plain(test->arena, logbuf_line(log, n)), S(text));
+        found = str_contains(ansi_strip(test->arena, logbuf_line(log, n)), S(text));
     }
     proc_unlock(proc);
     return found;

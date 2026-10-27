@@ -3,6 +3,7 @@
 #include <string.h>
 
 #include "format.h"
+#include "mc/term/ansi.h"
 #include "mc/log/logfile.h"
 #include "mc/platform/platform.h"
 
@@ -188,7 +189,7 @@ static void write_file(Proc *proc, Arena *scratch, String line)
     }
     ArenaMark mark = arena_mark(scratch);
     Err err = { 0 };
-    if (logfile_write(proc->file, scratch, logbuf_plain(scratch, line), clock_wall_ns(), &err) != ERR_OK) {
+    if (logfile_write(proc->file, scratch, ansi_strip(scratch, line), clock_wall_ns(), &err) != ERR_OK) {
         proc->file_failed = true;
         logbuf_note(proc->log, str_format(scratch, "\x1b[31m✖ the log file stopped:\x1b[0m %s", err.msg));
     }
@@ -217,7 +218,7 @@ static void write_file(Proc *proc, Arena *scratch, String line)
 static bool line_is_ready(Arena *scratch, String line, String pattern)
 {
     ArenaMark mark = arena_mark(scratch);
-    bool ready = str_contains(logbuf_plain(scratch, line), pattern);
+    bool ready = str_contains(ansi_strip(scratch, line), pattern);
     arena_release(mark);
     return ready;
 }

@@ -1,6 +1,7 @@
 #include "check.h"
 
-#include "logbuf.h"
+#include "mc/term/logbuf.h"
+#include "mc/term/ansi.h"
 #include "mc/platform/platform.h"
 
 enum {
@@ -104,7 +105,7 @@ static String last_line(Arena *scratch, String output)
 {
     StringList lines = str_split(scratch, output, '\n');
     for (size_t i = lines.count; i > 0; i--) {
-        String line = str_trim(logbuf_plain(scratch, lines.items[i - 1]));
+        String line = str_trim(ansi_strip(scratch, lines.items[i - 1]));
         if (line.len > 0) {
             return line;
         }

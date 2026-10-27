@@ -1,9 +1,7 @@
 #include "test.h"
 
-#include "logbuf.h"
-#include "logview.h"
-#include "screen.h"
-#include "theme.h"
+#include "mc/term/logbuf.h"
+#include "mc/term/ansi.h"
 
 static void logbuf_splits_terminal_output_into_lines(Test *test)
 {
@@ -27,7 +25,7 @@ static void logbuf_keeps_colour_and_drops_other_control(Test *test)
     test_check_str(test, logbuf_line(log, 0), S("\x1b[31mred\x1b[0m ok"), "SGR stays, erase and titles go");
     test_check_str(test, logbuf_line(log, 1), S("done"), "a carriage return rewrites the line");
     test_check_str(test, logbuf_line(log, 2), S("⠙ spun"), "so does moving to the first column");
-    test_check_str(test, logbuf_plain(test->arena, logbuf_line(log, 0)), S("red ok"), "plain text has no escapes");
+    test_check_str(test, ansi_strip(test->arena, logbuf_line(log, 0)), S("red ok"), "plain text has no escapes");
     logbuf_destroy(log);
 }
 
@@ -49,35 +47,9 @@ static void logbuf_forgets_the_oldest_lines(Test *test)
     logbuf_destroy(log);
 }
 
-static void log_lines_wrap_at_the_view_width(Test *test)
-{
-    test_check(test, log_line_rows(S("abcdef"), 3) == 2, "six columns in rows of three");
-    test_check(test, log_line_rows(S("\x1b[1mabc\x1b[0m"), 3) == 1, "escapes take no room");
-    test_check(test, log_line_rows(S("a\tb"), 8) == 2, "a tab moves to the next stop");
-    test_check(test, log_line_rows(S("界界"), 3) == 2, "a wide character does not split");
-    int row;
-    int column;
-    log_line_end(S("irb> "), 80, &row, &column);
-    test_check(test, row == 0 && column == 5, "the cursor goes after a prompt");
-}
-
-static void log_lines_draw_in_theme_colours(Test *test)
-{
-    const Theme *theme = theme_at(0);
-    Screen *screen = screen_create(COLOR_TRUE);
-    screen_resize(screen, 10, 2);
-    log_line_draw(screen, 0, 0, 10, 0, 2, S("\x1b[31mx\x1b[0my\x1b[38;2;1;2;3mz"), theme);
-    test_check(test, rgb_equal(screen_cell(screen, 0, 0)->fg, theme->ansi[1]), "red is the theme's red");
-    test_check(test, rgb_equal(screen_cell(screen, 1, 0)->fg, theme->text), "reset is the theme's text");
-    test_check(test, rgb_equal(screen_cell(screen, 2, 0)->fg, (Rgb) { 1, 2, 3 }), "true colour passes through");
-    screen_destroy(screen);
-}
-
 const TestCase LOG_TESTS[] = {
     { "logbuf_splits_terminal_output_into_lines", logbuf_splits_terminal_output_into_lines },
     { "logbuf_keeps_colour_and_drops_other_control", logbuf_keeps_colour_and_drops_other_control },
     { "logbuf_forgets_the_oldest_lines", logbuf_forgets_the_oldest_lines },
-    { "log_lines_wrap_at_the_view_width", log_lines_wrap_at_the_view_width },
-    { "log_lines_draw_in_theme_colours", log_lines_draw_in_theme_colours },
     { nullptr, nullptr },
 };

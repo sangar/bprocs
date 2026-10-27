@@ -1,6 +1,6 @@
 #pragma once
 
-#include "color.h"
+#include "mc/term/color.h"
 #include "mc/core/error.h"
 #include "mc/platform/pty.h"
 

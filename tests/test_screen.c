@@ -1,9 +1,9 @@
 #include "test.h"
 
-#include "draw.h"
+#include "mc/term/draw.h"
 #include "group.h"
 #include "layout.h"
-#include "screen.h"
+#include "mc/term/screen.h"
 
 static const Rgb WHITE = { 255, 255, 255 };
 static const Rgb BLACK = { 0, 0, 0 };
@@ -23,7 +23,7 @@ static void draw_text(Screen *screen, const char *text)
 
 static void screen_writes_only_what_changed(Test *test)
 {
-    Screen *screen = screen_create(COLOR_TRUE);
+    Screen *screen = screen_create(COLOR_DEPTH_TRUE);
     screen_resize(screen, 4, 2);
     draw_text(screen, "ab");
     String first = render(test, screen);
@@ -38,7 +38,7 @@ static void screen_writes_only_what_changed(Test *test)
     test_check(test, render(test, screen).len == 0, "an unchanged frame writes nothing");
     screen_destroy(screen);
 
-    screen = screen_create(COLOR_256);
+    screen = screen_create(COLOR_DEPTH_256);
     screen_resize(screen, 2, 1);
     draw_text(screen, "x");
     test_check(test, str_contains(render(test, screen), S("38;5;231")), "the 256-colour palette");
@@ -47,7 +47,7 @@ static void screen_writes_only_what_changed(Test *test)
 
 static void screen_keeps_wide_glyphs_whole(Test *test)
 {
-    Screen *screen = screen_create(COLOR_TRUE);
+    Screen *screen = screen_create(COLOR_DEPTH_TRUE);
     screen_resize(screen, 3, 1);
     test_check(test, screen_text(screen, 0, 0, 3, S("界"), WHITE, 0) == 2, "a wide glyph takes two columns");
     test_check(test, screen_cell(screen, 1, 0)->glyph == 0, "the second column is its tail");
@@ -59,7 +59,7 @@ static void screen_keeps_wide_glyphs_whole(Test *test)
 
 static void graphs_plot_in_braille(Test *test)
 {
-    Screen *screen = screen_create(COLOR_TRUE);
+    Screen *screen = screen_create(COLOR_DEPTH_TRUE);
     screen_resize(screen, 1, 2);
     Gradient gradient = { BLACK, BLACK, WHITE };
     History history = { 0 };
