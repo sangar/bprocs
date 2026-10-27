@@ -3,6 +3,7 @@
 #include <string.h>
 
 #include "mc/text/path.h"
+#include "mc/text/unicode.h"
 #include "mc/term/ansi.h"
 #include "protocol.h"
 #include "theme.h"
@@ -291,8 +292,8 @@ bool app_matches(App *app, String line)
         return false;
     }
     ArenaMark mark = arena_mark(app->frame);
-    bool found = str_contains(str_lower_ascii(app->frame, ansi_strip(app->frame, line)),
-                              str_lower_ascii(app->frame, app_search(app)));
+    bool found = str_contains(unicode_lower(app->frame, ansi_strip(app->frame, line)),
+                              unicode_lower(app->frame, app_search(app)));
     arena_release(mark);
     return found;
 }

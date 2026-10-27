@@ -4,6 +4,7 @@
 
 #include "mc/term/ansi.h"
 #include "mc/term/draw.h"
+#include "mc/text/unicode.h"
 #include "mc/text/utf8.h"
 #include "format.h"
 #include "theme.h"
@@ -797,28 +798,55 @@ typedef struct {
     int remaining; // rows still free above what is drawn
 } LogCanvas;
 
-static uint32_t lower_glyph(uint32_t glyph)
+// Search is the search text as lower case glyphs and the columns they take.
+typedef struct {
+    uint32_t glyphs[SEARCH_LIMIT];
+    size_t count;
+    int columns;
+} Search;
+
+static Search lowered_search(String text)
 {
-    return glyph >= 'A' && glyph <= 'Z' ? glyph + ('a' - 'A') : glyph;
+    Search search = { 0 };
+    size_t position = 0;
+    while (position < text.len) {
+        uint32_t glyph;
+        utf8_decode(text, &position, &glyph);
+        search.glyphs[search.count++] = unicode_lower_codepoint(glyph);
+        search.columns += utf8_codepoint_width(glyph);
+    }
+    return search;
+}
+
+// matches_at is whether search shows from (x, row), stepping over the second
+// cell of each wide glyph.
+static bool matches_at(Screen *screen, int x, int row, const Search *search)
+{
+    for (size_t i = 0; i < search->count; i++) {
+        Cell *cell = screen_cell(screen, x, row);
+        if (cell == nullptr || unicode_lower_codepoint(cell->glyph) != search->glyphs[i]) {
+            return false;
+        }
+        x += utf8_codepoint_width(search->glyphs[i]);
+    }
+    return true;
 }
 
 // highlight_matches marks where the search shows in rows y to y + rows of area.
 static void highlight_matches(App *app, Rect area, int y, int rows)
 {
-    String search = app_search(app);
-    if (search.len == 0 || search.len > (size_t)area.width) {
+    Search search = lowered_search(app_search(app));
+    if (search.count == 0 || search.columns > area.width) {
         return;
     }
     const Theme *theme = current_theme(app);
     for (int row = y; row < y + rows; row++) {
-        for (int x = area.x; x + (int)search.len <= area.x + area.width; x++) {
-            bool found = true;
-            for (size_t i = 0; i < search.len && found; i++) {
-                Cell *cell = screen_cell(app->screen, x + (int)i, row);
-                found = cell != nullptr && lower_glyph(cell->glyph) == lower_glyph((unsigned char)search.data[i]);
+        for (int x = area.x; x + search.columns <= area.x + area.width; x++) {
+            if (!matches_at(app->screen, x, row, &search)) {
+                continue;
             }
-            for (size_t i = 0; found && i < search.len; i++) {
-                Cell *cell = screen_cell(app->screen, x + (int)i, row);
+            for (int i = 0; i < search.columns; i++) {
+                Cell *cell = screen_cell(app->screen, x + i, row);
                 cell->bg = theme->highlight;
                 cell->fg = theme->background;
             }
