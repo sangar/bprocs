@@ -204,26 +204,6 @@ static int request(Client *client, Arena *arena, Node *message, Node **reply, St
 
 // ---- the TUI ----
 
-static ColorDepth terminal_color_depth(Arena *arena)
-{
-    String value;
-    if (env_get(arena, S("COLORTERM"), &value) && (str_equal(value, S("truecolor")) || str_equal(value, S("24bit")))) {
-        return COLOR_DEPTH_TRUE;
-    }
-    if (env_get(arena, S("TERM_PROGRAM"), &value) && str_equal(value, S("Apple_Terminal"))) {
-        return COLOR_DEPTH_256;
-    }
-    static const char *const TRUE_COLOR_TERMS[] = { "kitty", "ghostty", "wezterm", "alacritty", "foot", "direct" };
-    if (env_get(arena, S("TERM"), &value)) {
-        for (size_t i = 0; i < countof(TRUE_COLOR_TERMS); i++) {
-            if (str_contains(value, S(TRUE_COLOR_TERMS[i]))) {
-                return COLOR_DEPTH_TRUE;
-            }
-        }
-    }
-    return COLOR_DEPTH_256;
-}
-
 static bool choose_theme(String name, size_t *index)
 {
     *index = 0;
@@ -265,9 +245,12 @@ static int run_tui(Arena *arena, const Options *options)
         client_close(client);
         return status != EXIT_OK ? status : EXIT_USAGE;
     }
-    ColorDepth mode = options->force_256    ? COLOR_DEPTH_256
-                     : options->force_true ? COLOR_DEPTH_TRUE
-                                           : terminal_color_depth(arena);
+    // The themes need at least 256 colours, so the TUI never shows fewer.
+    ColorDepth detected = color_depth_detect(arena, true);
+    ColorDepth mode = options->force_256           ? COLOR_DEPTH_256
+                     : options->force_true        ? COLOR_DEPTH_TRUE
+                     : detected < COLOR_DEPTH_256 ? COLOR_DEPTH_256
+                                                  : detected;
     App *app = app_create(client, theme_index, mode, &user_config);
     Error ran = app_run(app, &err);
     app_destroy(app);

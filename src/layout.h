@@ -29,7 +29,3 @@ typedef struct Layout {
 } Layout;
 
 Layout layout_compute(int width, int height, size_t proc_count, unsigned shown);
-
-// rect_inner is rect without its border.
-Rect rect_inner(Rect rect);
-bool rect_contains(Rect rect, int x, int y);

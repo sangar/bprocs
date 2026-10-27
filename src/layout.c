@@ -56,13 +56,3 @@ Layout layout_compute(int width, int height, size_t proc_count, unsigned shown)
     layout.log = (Rect) { 0, top + list_height, width, body - list_height };
     return layout;
 }
-
-Rect rect_inner(Rect rect)
-{
-    return (Rect) { rect.x + 1, rect.y + 1, rect.width - 2, rect.height - 2 };
-}
-
-bool rect_contains(Rect rect, int x, int y)
-{
-    return x >= rect.x && y >= rect.y && x < rect.x + rect.width && y < rect.y + rect.height;
-}

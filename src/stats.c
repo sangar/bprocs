@@ -2,20 +2,6 @@
 
 #include "mc/core/arena.h"
 
-static float busy_share(CpuTicks before, CpuTicks after)
-{
-    if (after.total <= before.total || after.busy < before.busy) {
-        return 0.0f;
-    }
-    float share = (float)(after.busy - before.busy) / (float)(after.total - before.total);
-    return share > 1.0f ? 1.0f : share;
-}
-
-static float rate(uint64_t before, uint64_t after, double seconds)
-{
-    return after >= before && seconds > 0.0 ? (float)((double)(after - before) / seconds) : 0.0f;
-}
-
 void system_stats_sample(SystemStats *stats, Arena *scratch, int64_t now_ns)
 {
     SystemSample sample;
@@ -24,14 +10,15 @@ void system_stats_sample(SystemStats *stats, Arena *scratch, int64_t now_ns)
     }
     if (stats->has_previous) {
         double seconds = (double)(now_ns - stats->previous_ns) / (double)NS_PER_SECOND;
-        history_push(&stats->cpu, busy_share(stats->previous.cpu, sample.cpu));
+        history_push(&stats->cpu, cpu_busy_share(stats->previous.cpu, sample.cpu));
         stats->core_count = min_size(sample.core_count, SYSINFO_MAX_CORES);
         for (size_t i = 0; i < stats->core_count; i++) {
-            stats->cores[i] = busy_share(stats->previous.cores[i], sample.cores[i]);
+            stats->cores[i] = cpu_busy_share(stats->previous.cores[i], sample.cores[i]);
         }
-        history_push(&stats->download,
-                     rate(stats->previous.network_received_bytes, sample.network_received_bytes, seconds));
-        history_push(&stats->upload, rate(stats->previous.network_sent_bytes, sample.network_sent_bytes, seconds));
+        history_push(&stats->download, (float)counter_rate(stats->previous.network_received_bytes,
+                                                           sample.network_received_bytes, seconds));
+        history_push(&stats->upload,
+                     (float)counter_rate(stats->previous.network_sent_bytes, sample.network_sent_bytes, seconds));
     }
     stats->memory_used = sample.memory_used_bytes;
     stats->memory_total = sample.memory_total_bytes;

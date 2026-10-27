@@ -138,14 +138,14 @@ Headers live in `include/mc/<area>/` and their sources in `src/<area>/`.
 | | `mc/container/sort.h` | Stable merge sort and top-k selection with a comparator context |
 | crypto | `mc/crypto/sha256.h` | SHA-256, HMAC-SHA256, hex encoding |
 | | `mc/crypto/sigv4.h` | AWS Signature Version 4 request signing |
-| platform | `mc/platform/platform.h` | Clock, locale-independent floats, threads, files and mappings, reading a descriptor to its end, directories with metadata, advisory file locks, a search for a file up through parent directories, a private per-user runtime directory, processes (also detached into a session of their own), environment, signals and a thread that watches for them, TCP and Unix sockets, non-blocking accepts, sends and receives, and socket pairs for driving a server in-process |
+| platform | `mc/platform/platform.h` | Clock, secure random bytes, locale-independent floats, threads, files and mappings, reading a descriptor to its end, directories with metadata, advisory file locks, a search for a file up through parent directories, a private per-user runtime directory, processes (also detached into a session of their own), environment, signals and a thread that watches for them, TCP and Unix sockets, non-blocking accepts, sends and receives, and socket pairs for driving a server in-process |
 | | `mc/platform/frame.h` | Length-prefixed frames of a header and a body on a stream socket |
 | | `mc/platform/poll.h` | An event loop's wait on many sockets, on kqueue and epoll, with a wake from other threads; the `net_try_*` calls move bytes without waiting |
 | | `mc/platform/watch.h` | Recursive file watching on FSEvents and inotify, in settled batches of paths |
 | | `mc/platform/service.h` | Per-user login services: launchd agents and systemd user units |
 | | `mc/platform/terminal.h` | The controlling terminal in raw mode, its size and the width of any terminal descriptor, and waits that wake on input, resizes or another thread |
 | | `mc/platform/pty.h` | Programs run on a pseudo-terminal of their own: output, typed input, resizing, signals to the whole process group |
-| | `mc/platform/sysinfo.h` | CPU ticks per core, memory, swap, network bytes, load and uptime, and the CPU time and memory of a process group |
+| | `mc/platform/sysinfo.h` | CPU ticks per core, memory, swap, network bytes, load and uptime, the CPU time and memory of a process group, and the busy share and rates between two samples |
 | concurrency | `mc/concurrency/cancel.h` | Cancellation token with waits and sleeps that wake on cancel |
 | | `mc/concurrency/debounce.h` | Per-key debouncing: a callback once a key has been quiet for a delay |
 | | `mc/concurrency/outbox.h` | Bytes waiting for a writer thread, with a limit that drops a peer that stopped reading |
@@ -156,6 +156,7 @@ Headers live in `include/mc/<area>/` and their sources in `src/<area>/`.
 | | `mc/encoding/json.h` | Strict JSON parsing with line and column errors, encoding and quoting, on yyjson |
 | | `mc/encoding/yaml.h` | YAML 1.2 parsing with core schema typing and shared aliases, on cyaml |
 | | `mc/encoding/base64.h` | RFC 4648 Base64, standard with padding or URL-safe without, decoding only the canonical encoding |
+| | `mc/encoding/gzip.h` | gzip compression with an optional header comment, and decompression bounded in size, on zlib |
 | | `mc/encoding/dotenv.h` | `.env` files into `NAME=value` entries, with quotes and comments and no expansion |
 | | `mc/encoding/markdown.h` | CommonMark with GitHub's tables, task lists, strikethrough and autolinks to HTML, on md4c; raw HTML and script links shown as text unless allowed |
 | | `mc/encoding/xml.h` | XML 1.0 as start tags, end tags and text, on Expat, with entity expansion bounded and external entities never loaded |
