@@ -126,7 +126,8 @@ static String boxes_line(Arena *arena, unsigned boxes)
     return names.count == 0 ? S("boxes: \"\"") : str_concat(arena, S("boxes: "), str_join(arena, names, S(" ")));
 }
 
-Error user_config_save_boxes(Arena *arena, String path, unsigned boxes, Err *err)
+// save_setting writes the line of key and keeps the rest of the config.
+[[nodiscard]] static Error save_setting(Arena *arena, String path, String key, String line, Err *err)
 {
     String text = S("");
     if (file_exists(path)) {
@@ -136,10 +137,10 @@ Error user_config_save_boxes(Arena *arena, String path, unsigned boxes, Err *err
         }
     }
     StringList lines = strlist_from_lines(arena, str_trim_suffix(text, S("\n")));
-    String line = boxes_line(arena, boxes);
+    String prefix = str_concat(arena, key, S(":"));
     bool replaced = false;
     for (size_t i = 0; i < lines.count; i++) {
-        if (str_starts_with(lines.items[i], S("boxes:"))) {
+        if (str_starts_with(lines.items[i], prefix)) {
             lines.items[i] = line;
             replaced = true;
         }
@@ -149,4 +150,14 @@ Error user_config_save_boxes(Arena *arena, String path, unsigned boxes, Err *err
     }
     String written = str_concat(arena, str_join(arena, lines, S("\n")), S("\n"));
     return file_write_atomic(path, written, 0644, err);
+}
+
+Error user_config_save_boxes(Arena *arena, String path, unsigned boxes, Err *err)
+{
+    return save_setting(arena, path, S("boxes"), boxes_line(arena, boxes), err);
+}
+
+Error user_config_save_theme(Arena *arena, String path, String theme, Err *err)
+{
+    return save_setting(arena, path, S("theme"), str_concat(arena, S("theme: "), theme), err);
 }

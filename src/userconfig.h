@@ -21,3 +21,5 @@ String user_theme_path(Arena *arena, String name);
 // user_config_save_boxes writes the boxes: line of the config at path and
 // keeps the rest of it, making the file and its directories when missing.
 [[nodiscard]] Error user_config_save_boxes(Arena *arena, String path, unsigned boxes, Err *err);
+// user_config_save_theme writes the theme: line, as user_config_save_boxes does boxes:.
+[[nodiscard]] Error user_config_save_theme(Arena *arena, String path, String theme, Err *err);

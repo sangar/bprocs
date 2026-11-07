@@ -427,6 +427,11 @@ static void user_config_remembers_the_boxes(Test *test)
     test_check_str(test, text, S("# mine\nboxes: \"\"\n"), "only the boxes line changes");
     test_check(test, user_config_load(a, path, &config, &err) == ERR_OK && config.boxes == 0,
                "hiding every box is remembered too");
+
+    test_check(test, user_config_save_theme(a, path, S("omarchy"), &err) == ERR_OK, err.msg);
+    test_check(test, user_config_load(a, path, &config, &err) == ERR_OK && config.boxes == 0 &&
+                         str_equal(config.theme, S("omarchy")),
+               "the theme is saved beside the boxes");
     test_check(test, dir_remove_all(dir, &err) == ERR_OK, "clean up");
 }
 

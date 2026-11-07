@@ -16,6 +16,7 @@
 #include "mc/text/fmt.h"
 #include "mc/text/path.h"
 #include "mc/text/table.h"
+#include "omarchy.h"
 #include "protocol.h"
 #include "runner.h"
 #include "theme.h"
@@ -50,6 +51,7 @@ static const char USAGE[] =
     "  run [NAME…] [--wait NAME] [--exit-on-failure] [--ready-timeout D] [--plain]\n"
     "                          run in the foreground without a daemon, for CI\n"
     "  reload                  read the config again; restart only the procs that changed\n"
+    "  setup omarchy           follow the Omarchy theme, as btop does\n"
     "  ls                      every running daemon on this machine\n"
     "\n"
     "A NAME can also be an app of include:, for every proc of it.\n"
@@ -861,6 +863,19 @@ static int run_daemon(Arena *arena, const Options *options)
     return daemon_main(&config);
 }
 
+static int run_setup(Arena *arena, const Options *options)
+{
+    if (options->args.count != 1 || !str_equal(options->args.items[0], S("omarchy"))) {
+        return fail("setup takes what to set up: omarchy");
+    }
+    Err err = { 0 };
+    if (omarchy_setup(arena, &err) != ERR_OK) {
+        return fail("%s", err.msg);
+    }
+    printf("✓ bprocs follows the Omarchy theme\n");
+    return EXIT_OK;
+}
+
 static int dispatch(Arena *arena, const Options *options)
 {
     String command = options->command;
@@ -899,6 +914,9 @@ static int dispatch(Arena *arena, const Options *options)
     }
     if (str_equal(command, S("reload"))) {
         return run_reload(arena, options);
+    }
+    if (str_equal(command, S("setup"))) {
+        return run_setup(arena, options);
     }
     if (str_equal(command, S("daemon"))) {
         return run_daemon(arena, options);

@@ -20,7 +20,7 @@ It reads a `bprocs.yml`, and a `Procfile` works as it does with foreman.
 - **Checks.** `ready:` holds a process in *starting* until a line of its output, a port, an HTTP endpoint or a command says it is up. `health:` keeps checking while it runs.
 - **Restarts.** `restart: on-failure` or `always` starts it again with a growing pause, after a crash, a start that was not ready in time, or a failed health check, and gives up after ten quick failures in a row.
 - **A daemon per project.** The TUI, the CLI and `bprocs run` talk to it over a Unix socket only its user can open. `bprocs ls` and `p` in the TUI list every project that runs on the machine.
-- **Themes.** tokyo-night, dracula, nord, gruvbox and catppuccin, and [theme files](#theme-files) of your own; `t` cycles through them. Each theme also recolours the programs' own 16 colours.
+- **Themes.** tokyo-night, dracula, nord, gruvbox and catppuccin, and [theme files](#theme-files) of your own; `t` cycles through them. Each theme also recolours the programs' own 16 colours. On [Omarchy](#omarchy), bprocs can follow the system's theme, as btop does.
 - **Small terminals.** `1` to `4` hide the cpu, memory, network and details boxes, as in btop, and give their room to the list and the log. The TUI remembers them in [your own config](#your-own-settings). The layout also drops the system boxes and then the details as the terminal shrinks; the mouse selects and scrolls.
 
 ## Install
@@ -55,6 +55,7 @@ The config is found in the current directory or the nearest one above it: `bproc
 | `bprocs attach NAME` | type into a proc on this terminal; ctrl-a d detaches |
 | `bprocs wait NAME… [--timeout 2m]` | until each is up, or a job has succeeded |
 | `bprocs reload` | read the config again: restart only the procs that changed, start new ones, stop gone ones; `SIGHUP` to the daemon does the same |
+| `bprocs setup omarchy` | follow the [Omarchy](#omarchy) theme, as btop does |
 | `bprocs ls` | every running daemon on this machine |
 | `bprocs run [NAME…] [--wait NAME] [--exit-on-failure] [--ready-timeout D] [--plain]` | run in the foreground, without a daemon, for CI |
 
@@ -264,6 +265,10 @@ ansi: ["#15161e", "#f7768e", "#9ece6a", "#e0af68",      # what the procs' 16 col
        "#8db0ff", "#c7a9ff", "#a4daff", "#c0caf5"]
 ```
 
+### Omarchy
+
+`bprocs setup omarchy` themes bprocs with [Omarchy](https://omarchy.org) the way Omarchy themes btop. It puts a template in `~/.config/omarchy/themed/`, from which Omarchy makes `bprocs-theme.yml` on every theme change, links the theme file `~/.config/bprocs/themes/omarchy.yml` to it, sets `theme: omarchy` in your settings, and runs `omarchy-theme-refresh` to make the file for the theme Omarchy shows now. The TUI then follows the theme as it changes. A package cannot do this for you, as it does not write to your home.
+
 ## Profile
 
 | | |
@@ -295,6 +300,7 @@ Windows is not supported: it has no pseudo-terminals of the POSIX kind, and libm
 | `src/main.c`, `src/cli.c` | the command line and every command |
 | `src/config.c` | `bprocs.yml` and `Procfile` |
 | `src/userconfig.c` | your own settings, in `~/.config/bprocs/config.yml` |
+| `src/omarchy.c` | `bprocs setup omarchy` and its theme template |
 | `src/proc.c` | one supervised program: run, read, stop, restart, its log file |
 | `src/supervisor.c` | the procs of a config: needs, checks, restart policies, down in order, reload |
 | `src/check.c` | port, HTTP and command checks |
