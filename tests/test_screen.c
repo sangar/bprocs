@@ -4,6 +4,7 @@
 #include "group.h"
 #include "layout.h"
 #include "mc/term/screen.h"
+#include "theme.h"
 
 static const Rgb WHITE = { 255, 255, 255 };
 static const Rgb BLACK = { 0, 0, 0 };
@@ -165,6 +166,33 @@ static void groups_show_the_proc_most_in_need_of_attention(Test *test)
                "a stopped proc only shows when none runs, and a finished setup job never");
 }
 
+static const char THEME_FILE[] = "background: \"#1e1e2e\"\n"
+                                 "surface: \"#313244\"\nborder: \"#45475a\"\nfocus: \"#89b4fa\"\n"
+                                 "text: \"#cdd6f4\"\nmuted: \"#585b70\"\nfaint: \"#313244\"\n"
+                                 "highlight: \"#f6b6ab\"\nselection: \"#45475a\"\nrunning: \"#a6e3a1\"\n"
+                                 "starting: \"#f9e2af\"\nstopped: \"#585b70\"\nfailed: \"#f38ba8\"\n"
+                                 "cpu: [\"#a6e3a1\", \"#f9e2af\", \"#f38ba8\"]\n"
+                                 "memory: [\"#94e2d5\", \"#89b4fa\", \"#f5c2e7\"]\n"
+                                 "download: [\"#94e2d5\", \"#94e2d5\", \"#cdd6f4\"]\n"
+                                 "upload: [\"#f5c2e7\", \"#f5c2e7\", \"#f38ba8\"]\n"
+                                 "accents: [\"#89b4fa\", \"#f5c2e7\", \"#94e2d5\", \"#a6e3a1\",\n"
+                                 "          \"#f9e2af\", \"#f6b6ab\", \"#f38ba8\", \"#94e2d5\"]\n"
+                                 "ansi: [\"#1e1e2e\", \"#f38ba8\", \"#a6e3a1\", \"#f9e2af\", \"#89b4fa\", \"#f5c2e7\",\n"
+                                 "       \"#94e2d5\", \"#cdd6f4\", \"#585b70\", \"#f38ba8\", \"#a6e3a1\", \"#f9e2af\",\n"
+                                 "       \"#89b4fa\", \"#f5c2e7\", \"#94e2d5\", \"#cdd6f4\"]\n";
+
+static void theme_files_set_every_colour(Test *test)
+{
+    Theme theme = { 0 };
+    Err err = { 0 };
+    test_check(test, theme_parse(test->arena, S(THEME_FILE), &theme, &err) == ERR_OK, err.msg);
+    test_check(test, rgb_equal(theme.background, (Rgb) { 0x1e, 0x1e, 0x2e }), "the background");
+    test_check(test, rgb_equal(theme.memory.end, (Rgb) { 0xf5, 0xc2, 0xe7 }), "a gradient's end");
+    test_check(test, rgb_equal(theme.ansi[15], (Rgb) { 0xcd, 0xd6, 0xf4 }), "the last ansi colour");
+    String missing = str_trim_prefix(S(THEME_FILE), S("background: \"#1e1e2e\"\n"));
+    test_check(test, theme_parse(test->arena, missing, &theme, &err) == ERR_PARSE, "a missing colour");
+}
+
 const TestCase SCREEN_TESTS[] = {
     { "screen_writes_only_what_changed", screen_writes_only_what_changed },
     { "screen_keeps_wide_glyphs_whole", screen_keeps_wide_glyphs_whole },
@@ -174,5 +202,6 @@ const TestCase SCREEN_TESTS[] = {
     { "hidden_boxes_give_their_room_to_the_rest", hidden_boxes_give_their_room_to_the_rest },
     { "groups_list_an_apps_procs_under_a_header", groups_list_an_apps_procs_under_a_header },
     { "groups_show_the_proc_most_in_need_of_attention", groups_show_the_proc_most_in_need_of_attention },
+    { "theme_files_set_every_colour", theme_files_set_every_colour },
     { nullptr, nullptr },
 };

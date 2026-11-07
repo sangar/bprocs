@@ -15,14 +15,24 @@ static const struct {
     { BOX_DETAIL, "details" },
 };
 
-String user_config_path(Arena *arena)
+static String config_directory(Arena *arena)
 {
     String home;
     // The XDG spec says to ignore a relative $XDG_CONFIG_HOME.
     if (!env_get(arena, S("XDG_CONFIG_HOME"), &home) || !path_is_absolute(home)) {
         home = path_join(arena, env_home(arena), S(".config"));
     }
-    return path_join(arena, home, S("bprocs/config.yml"));
+    return path_join(arena, home, S("bprocs"));
+}
+
+String user_config_path(Arena *arena)
+{
+    return path_join(arena, config_directory(arena), S("config.yml"));
+}
+
+String user_theme_path(Arena *arena, String name)
+{
+    return path_join(arena, config_directory(arena), str_format(arena, "themes/%.*s.yml", (int)name.len, name.data));
 }
 
 static bool box_named(String name, unsigned *box)
@@ -58,6 +68,15 @@ static bool box_named(String name, unsigned *box)
     return ERR_OK;
 }
 
+[[nodiscard]] static Error read_theme(const Node *node, String *theme, Err *err)
+{
+    if (node->kind != NODE_STRING) {
+        return err_set(err, ERR_PARSE, "line %zu: theme: expected a name, like tokyo-night", node->line);
+    }
+    *theme = node->text;
+    return ERR_OK;
+}
+
 [[nodiscard]] static Error read_user_config(Arena *arena, String text, UserConfig *config, Err *err)
 {
     Node *root;
@@ -72,8 +91,9 @@ static bool box_named(String name, unsigned *box)
         String key = root->entries[i].key;
         const Node *value = root->entries[i].value;
         Error e = str_equal(key, S("boxes")) ? read_boxes(arena, value, &config->boxes, err)
-                                             : err_set(err, ERR_PARSE, "line %zu: %.*s: unknown setting", value->line,
-                                                       (int)key.len, key.data);
+                  : str_equal(key, S("theme")) ? read_theme(value, &config->theme, err)
+                                               : err_set(err, ERR_PARSE, "line %zu: %.*s: unknown setting",
+                                                         value->line, (int)key.len, key.data);
         if (e != ERR_OK) {
             return e;
         }

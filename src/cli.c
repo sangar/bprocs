@@ -57,7 +57,8 @@ static const char USAGE[] =
     "options, before the command:\n"
     "  -C DIR         look for the config from DIR\n"
     "  -f FILE        use this config\n"
-    "  --theme NAME   tokyo-night, dracula, nord, gruvbox or catppuccin\n"
+    "  --theme NAME   tokyo-night, dracula, nord, gruvbox, catppuccin\n"
+    "                 or a theme file in ~/.config/bprocs/themes\n"
     "  --256          use the 256-colour palette instead of true colour\n"
     "  --truecolor    use true colour even where the terminal does not say it can\n"
     "  -h, --help     show this help\n"
@@ -204,17 +205,32 @@ static int request(Client *client, Arena *arena, Node *message, Node **reply, St
 
 // ---- the TUI ----
 
-static bool choose_theme(String name, size_t *index)
+// choose_theme finds the theme called name: a built-in one, else the theme
+// file of that name, whose path it sets and whose index is theme_count().
+static bool choose_theme(Arena *arena, String name, size_t *index, String *path)
 {
     *index = 0;
+    *path = S("");
     if (name.len == 0 || theme_find(name, index)) {
+        return true;
+    }
+    String file = user_theme_path(arena, name);
+    if (file_exists(file)) {
+        Theme theme;
+        Err err = { 0 };
+        if (theme_load(arena, file, &theme, &err) != ERR_OK) {
+            fprintf(stderr, "bprocs: %s\n", err.msg);
+            return false;
+        }
+        *index = theme_count();
+        *path = file;
         return true;
     }
     fprintf(stderr, "bprocs: no theme called %.*s; there are", (int)name.len, name.data);
     for (size_t i = 0; i < theme_count(); i++) {
         fprintf(stderr, "%s %s", i == 0 ? "" : ",", theme_at(i)->name);
     }
-    fprintf(stderr, "\n");
+    fprintf(stderr, ", and theme files in %.*s\n", (int)path_dir(file).len, path_dir(file).data);
     return false;
 }
 
@@ -239,9 +255,13 @@ static int run_tui(Arena *arena, const Options *options)
         Node *reply;
         status = request(client, arena, message(arena, "up"), &reply, nullptr);
     }
+    // The user's own theme: wins over the project's, which the project's people share.
+    String theme = options->theme.len > 0       ? options->theme
+                   : user_config.theme.len > 0 ? user_config.theme
+                                               : client_info(client)->theme;
     size_t theme_index;
-    if (status != EXIT_OK ||
-        !choose_theme(options->theme.len > 0 ? options->theme : client_info(client)->theme, &theme_index)) {
+    String theme_path;
+    if (status != EXIT_OK || !choose_theme(arena, theme, &theme_index, &theme_path)) {
         client_close(client);
         return status != EXIT_OK ? status : EXIT_USAGE;
     }
@@ -251,7 +271,7 @@ static int run_tui(Arena *arena, const Options *options)
                      : options->force_true        ? COLOR_DEPTH_TRUE
                      : detected < COLOR_DEPTH_256 ? COLOR_DEPTH_256
                                                   : detected;
-    App *app = app_create(client, theme_index, mode, &user_config);
+    App *app = app_create(client, theme_index, theme_path, mode, &user_config);
     Error ran = app_run(app, &err);
     app_destroy(app);
     return ran == ERR_OK ? EXIT_OK : fail("%s", err.msg);

@@ -9,10 +9,13 @@
 typedef struct UserConfig {
     String path;
     unsigned boxes; // the LayoutBox bits shown
+    String theme;   // empty for the project's
 } UserConfig;
 
 // user_config_path is $XDG_CONFIG_HOME/bprocs/config.yml, else ~/.config/bprocs/config.yml.
 String user_config_path(Arena *arena);
+// user_theme_path is where the theme file called name is kept, beside the config, in themes/NAME.yml.
+String user_theme_path(Arena *arena, String name);
 // user_config_load reads the config at path; a missing one is every default.
 [[nodiscard]] Error user_config_load(Arena *arena, String path, UserConfig *config, Err *err);
 // user_config_save_boxes writes the boxes: line of the config at path and

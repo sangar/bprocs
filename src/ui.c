@@ -7,7 +7,6 @@
 #include "mc/text/unicode.h"
 #include "mc/text/utf8.h"
 #include "format.h"
-#include "theme.h"
 
 static const float INTRO_MS = 700.0f;
 static const float TOAST_MS = 2600.0f;
@@ -44,7 +43,7 @@ static const float TAU = 6.2831853f;
 
 static const Theme *current_theme(const App *app)
 {
-    return theme_at(app->theme_index);
+    return app_theme(app);
 }
 
 static float elapsed_ms(const App *app, int64_t since_ns)

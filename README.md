@@ -20,7 +20,7 @@ It reads a `bprocs.yml`, and a `Procfile` works as it does with foreman.
 - **Checks.** `ready:` holds a process in *starting* until a line of its output, a port, an HTTP endpoint or a command says it is up. `health:` keeps checking while it runs.
 - **Restarts.** `restart: on-failure` or `always` starts it again with a growing pause, after a crash, a start that was not ready in time, or a failed health check, and gives up after ten quick failures in a row.
 - **A daemon per project.** The TUI, the CLI and `bprocs run` talk to it over a Unix socket only its user can open. `bprocs ls` and `p` in the TUI list every project that runs on the machine.
-- **Themes.** tokyo-night, dracula, nord, gruvbox and catppuccin; `t` cycles through them. Each theme also recolours the programs' own 16 colours.
+- **Themes.** tokyo-night, dracula, nord, gruvbox and catppuccin, and [theme files](#theme-files) of your own; `t` cycles through them. Each theme also recolours the programs' own 16 colours.
 - **Small terminals.** `1` to `4` hide the cpu, memory, network and details boxes, as in btop, and give their room to the list and the log. The TUI remembers them in [your own config](#your-own-settings). The layout also drops the system boxes and then the details as the terminal shrinks; the mouse selects and scrolls.
 
 ## Install
@@ -229,9 +229,40 @@ Run bprocs from the directory of this config, or with `-C ..` from an app's: ins
 
 ```yaml
 boxes: cpu mem net details   # the boxes 1 to 4 hide and show; "" for none
+theme: omarchy               # optional; wins over a project's theme:
 ```
 
 An unknown setting or box is an error with its line, as in `bprocs.yml`.
+
+### Theme files
+
+A theme file in `~/.config/bprocs/themes/NAME.yml` makes a theme called `NAME`. It sets every colour a built-in theme has, and the TUI reads it again when it changes:
+
+```yaml
+background: "#1a1b26"
+surface: "#24283b"             # overlays and the footer
+border: "#3b4261"
+focus: "#7aa2f7"               # the border and marks of what has the keyboard
+text: "#c0caf5"
+muted: "#565f89"
+faint: "#292e42"               # the empty part of meters
+highlight: "#ff9e64"           # key names in hints
+selection: "#2e3c64"
+running: "#9ece6a"
+starting: "#e0af68"
+stopped: "#565f89"
+failed: "#f7768e"
+cpu: ["#9ece6a", "#e0af68", "#f7768e"]       # gradients run from low to high
+memory: ["#7dcfff", "#7aa2f7", "#bb9af7"]
+download: ["#1abc9c", "#73daca", "#b4f9f8"]
+upload: ["#9d7cd8", "#bb9af7", "#ff007c"]
+accents: ["#7aa2f7", "#bb9af7", "#7dcfff", "#9ece6a",   # process names, in turn
+          "#e0af68", "#ff9e64", "#f7768e", "#2ac3de"]
+ansi: ["#15161e", "#f7768e", "#9ece6a", "#e0af68",      # what the procs' 16 colours become
+       "#7aa2f7", "#bb9af7", "#7dcfff", "#a9b1d6",
+       "#414868", "#ff899d", "#b9f27c", "#ff9e64",
+       "#8db0ff", "#c7a9ff", "#a4daff", "#c0caf5"]
+```
 
 ## Profile
 
