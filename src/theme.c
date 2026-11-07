@@ -1,5 +1,8 @@
 #include "theme.h"
 
+#include "mc/platform/platform.h"
+#include "mc/text/path.h"
+
 static const Theme THEMES[] = {
     {
         .name = "tokyo-night",
@@ -152,4 +155,80 @@ bool theme_find(String name, size_t *index)
         }
     }
     return false;
+}
+
+String omarchy_colors_path(Arena *arena)
+{
+    return path_join(arena, env_home(arena), S(".local/state/omarchy/current/theme/colors.toml"));
+}
+
+// omarchy_color is the colour of a key = "#rrggbb" line of colors.toml.
+static bool omarchy_color(StringList lines, const char *key, Rgb *color)
+{
+    for (size_t i = 0; i < lines.count; i++) {
+        String name, value;
+        if (str_cut(lines.items[i], '=', &name, &value) && str_equal(str_trim(name), S(key))) {
+            return rgb_parse(str_trim_suffix(str_trim_prefix(str_trim(value), S("\"")), S("\"")), color);
+        }
+    }
+    return false;
+}
+
+static Rgb omarchy_pick(StringList lines, const char *key, Rgb fallback)
+{
+    Rgb color = fallback;
+    omarchy_color(lines, key, &color);
+    return color;
+}
+
+bool theme_from_omarchy(Arena *arena, String colors, Theme *theme)
+{
+    StringList lines = str_split(arena, colors, '\n');
+    Rgb background, text;
+    if (!omarchy_color(lines, "background", &background) || !omarchy_color(lines, "foreground", &text)) {
+        return false;
+    }
+    Rgb accent = omarchy_pick(lines, "accent", text);
+    Rgb muted = omarchy_pick(lines, "muted", rgb_mix(background, text, 0.4));
+    Rgb selection = omarchy_pick(lines, "selection", rgb_mix(background, text, 0.2));
+    Rgb lighter = omarchy_pick(lines, "lighter_background", rgb_mix(background, text, 0.1));
+    Rgb red = omarchy_pick(lines, "red", accent);
+    Rgb green = omarchy_pick(lines, "green", accent);
+    Rgb yellow = omarchy_pick(lines, "yellow", accent);
+    Rgb orange = omarchy_pick(lines, "orange", yellow);
+    Rgb blue = omarchy_pick(lines, "blue", accent);
+    Rgb magenta = omarchy_pick(lines, "magenta", accent);
+    Rgb cyan = omarchy_pick(lines, "cyan", accent);
+    Rgb bright_red = omarchy_pick(lines, "bright_red", red);
+    Rgb bright_green = omarchy_pick(lines, "bright_green", green);
+    Rgb bright_yellow = omarchy_pick(lines, "bright_yellow", yellow);
+    Rgb bright_blue = omarchy_pick(lines, "bright_blue", blue);
+    Rgb bright_magenta = omarchy_pick(lines, "bright_magenta", magenta);
+    Rgb bright_cyan = omarchy_pick(lines, "bright_cyan", cyan);
+    *theme = (Theme) {
+        .name = "omarchy",
+        .background = background,
+        .surface = lighter,
+        .border = selection,
+        .focus = accent,
+        .text = text,
+        .muted = muted,
+        .faint = lighter,
+        .highlight = orange,
+        .selection = selection,
+        .running = green,
+        .starting = yellow,
+        .stopped = muted,
+        .failed = red,
+        .cpu = { green, yellow, red },
+        .memory = { cyan, blue, magenta },
+        .download = { cyan, bright_cyan, text },
+        .upload = { magenta, bright_magenta, red },
+        .accents = { blue, magenta, cyan, green, yellow, orange, red, bright_cyan },
+        // As Omarchy's own terminal themes map them.
+        .ansi = { background, red, green, yellow, blue, magenta, cyan, text, muted, bright_red, bright_green,
+                  bright_yellow, bright_blue, bright_magenta, bright_cyan,
+                  omarchy_pick(lines, "bright_foreground", text) },
+    };
+    return true;
 }

@@ -12,6 +12,7 @@
 #include "proc.h"
 #include "mc/term/screen.h"
 #include "stats.h"
+#include "theme.h"
 #include "userconfig.h"
 
 typedef enum Focus {
@@ -66,7 +67,11 @@ typedef struct App {
     size_t selected;    // a row
     size_t list_offset; // the first row the list shows
     Focus focus;
-    size_t theme_index;
+    size_t theme_index; // theme_count() for the Omarchy theme
+    Theme omarchy;      // the system's theme, when Omarchy shows one
+    bool has_omarchy;
+    String omarchy_path;
+    int64_t omarchy_mtime_ns;
 
     Terminal *terminal;
     Screen *screen;
@@ -127,6 +132,8 @@ void app_destroy(App *app);
 // brought everything down at the user's request.
 [[nodiscard]] Error app_run(App *app, Err *err);
 
+// app_theme is the theme the TUI draws in.
+const Theme *app_theme(const App *app);
 // app_accent is the colour of process index in the current theme.
 Rgb app_accent(const App *app, size_t index);
 // app_waiting_for names the needs of process index that are not up yet, in the frame arena.

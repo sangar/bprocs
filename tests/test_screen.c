@@ -4,6 +4,7 @@
 #include "group.h"
 #include "layout.h"
 #include "mc/term/screen.h"
+#include "theme.h"
 
 static const Rgb WHITE = { 255, 255, 255 };
 static const Rgb BLACK = { 0, 0, 0 };
@@ -165,6 +166,21 @@ static void groups_show_the_proc_most_in_need_of_attention(Test *test)
                "a stopped proc only shows when none runs, and a finished setup job never");
 }
 
+static void omarchy_colours_make_a_theme(Test *test)
+{
+    Theme theme;
+    String colors = S("mode = \"dark\"\n"
+                      "accent = \"#89b4fa\"\n"
+                      "background = \"#1e1e2e\"\n"
+                      "foreground = \"#cdd6f4\"\n"
+                      "red = \"#f38ba8\"\n");
+    test_check(test, theme_from_omarchy(test->arena, colors, &theme), "a theme");
+    test_check(test, rgb_equal(theme.background, (Rgb) { 0x1e, 0x1e, 0x2e }), "the background");
+    test_check(test, rgb_equal(theme.failed, (Rgb) { 0xf3, 0x8b, 0xa8 }), "red for failures");
+    test_check(test, rgb_equal(theme.running, (Rgb) { 0x89, 0xb4, 0xfa }), "the accent for a missing green");
+    test_check(test, !theme_from_omarchy(test->arena, S("accent = \"#89b4fa\"\n"), &theme), "none without a background");
+}
+
 const TestCase SCREEN_TESTS[] = {
     { "screen_writes_only_what_changed", screen_writes_only_what_changed },
     { "screen_keeps_wide_glyphs_whole", screen_keeps_wide_glyphs_whole },
@@ -174,5 +190,6 @@ const TestCase SCREEN_TESTS[] = {
     { "hidden_boxes_give_their_room_to_the_rest", hidden_boxes_give_their_room_to_the_rest },
     { "groups_list_an_apps_procs_under_a_header", groups_list_an_apps_procs_under_a_header },
     { "groups_show_the_proc_most_in_need_of_attention", groups_show_the_proc_most_in_need_of_attention },
+    { "omarchy_colours_make_a_theme", omarchy_colours_make_a_theme },
     { nullptr, nullptr },
 };

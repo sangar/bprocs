@@ -57,7 +57,7 @@ static const char USAGE[] =
     "options, before the command:\n"
     "  -C DIR         look for the config from DIR\n"
     "  -f FILE        use this config\n"
-    "  --theme NAME   tokyo-night, dracula, nord, gruvbox or catppuccin\n"
+    "  --theme NAME   tokyo-night, dracula, nord, gruvbox, catppuccin or omarchy\n"
     "  --256          use the 256-colour palette instead of true colour\n"
     "  --truecolor    use true colour even where the terminal does not say it can\n"
     "  -h, --help     show this help\n"
@@ -206,15 +206,17 @@ static int request(Client *client, Arena *arena, Node *message, Node **reply, St
 
 static bool choose_theme(String name, size_t *index)
 {
-    *index = 0;
-    if (name.len == 0 || theme_find(name, index)) {
+    // theme_count() asks for the Omarchy theme, which the TUI leaves for the
+    // first when Omarchy shows none.
+    *index = theme_count();
+    if (name.len == 0 || str_equal(name, S("omarchy")) || theme_find(name, index)) {
         return true;
     }
     fprintf(stderr, "bprocs: no theme called %.*s; there are", (int)name.len, name.data);
     for (size_t i = 0; i < theme_count(); i++) {
         fprintf(stderr, "%s %s", i == 0 ? "" : ",", theme_at(i)->name);
     }
-    fprintf(stderr, "\n");
+    fprintf(stderr, ", omarchy\n");
     return false;
 }
 
@@ -239,9 +241,12 @@ static int run_tui(Arena *arena, const Options *options)
         Node *reply;
         status = request(client, arena, message(arena, "up"), &reply, nullptr);
     }
+    // The system's theme is the user's own choice, so it wins over a project's theme:.
+    FileInfo omarchy = { 0 };
+    bool on_omarchy = file_info_follow(omarchy_colors_path(arena), &omarchy, nullptr) == ERR_OK && omarchy.exists;
+    String theme = options->theme.len > 0 ? options->theme : on_omarchy ? S("omarchy") : client_info(client)->theme;
     size_t theme_index;
-    if (status != EXIT_OK ||
-        !choose_theme(options->theme.len > 0 ? options->theme : client_info(client)->theme, &theme_index)) {
+    if (status != EXIT_OK || !choose_theme(theme, &theme_index)) {
         client_close(client);
         return status != EXIT_OK ? status : EXIT_USAGE;
     }

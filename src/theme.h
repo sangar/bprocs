@@ -1,5 +1,6 @@
 #pragma once
 
+#include "mc/core/arena.h"
 #include "mc/term/color.h"
 
 enum { THEME_ACCENTS = 8 };
@@ -31,3 +32,9 @@ size_t theme_count(void);
 const Theme *theme_at(size_t index);
 // theme_find looks a theme up by name.
 bool theme_find(String name, size_t *index);
+
+// omarchy_colors_path is where Omarchy keeps the colours of the system's theme.
+String omarchy_colors_path(Arena *arena);
+// theme_from_omarchy makes a theme of the text of an Omarchy colors.toml;
+// false when it has no background or foreground.
+bool theme_from_omarchy(Arena *arena, String colors, Theme *theme);

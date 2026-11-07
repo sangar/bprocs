@@ -20,7 +20,7 @@ It reads a `bprocs.yml`, and a `Procfile` works as it does with foreman.
 - **Checks.** `ready:` holds a process in *starting* until a line of its output, a port, an HTTP endpoint or a command says it is up. `health:` keeps checking while it runs.
 - **Restarts.** `restart: on-failure` or `always` starts it again with a growing pause, after a crash, a start that was not ready in time, or a failed health check, and gives up after ten quick failures in a row.
 - **A daemon per project.** The TUI, the CLI and `bprocs run` talk to it over a Unix socket only its user can open. `bprocs ls` and `p` in the TUI list every project that runs on the machine.
-- **Themes.** tokyo-night, dracula, nord, gruvbox and catppuccin; `t` cycles through them. Each theme also recolours the programs' own 16 colours.
+- **Themes.** tokyo-night, dracula, nord, gruvbox and catppuccin; `t` cycles through them. On [Omarchy](https://omarchy.org) the TUI takes the system's theme, `omarchy`, over a project's `theme:` and follows it when it changes. Each theme also recolours the programs' own 16 colours.
 - **Small terminals.** `1` to `4` hide the cpu, memory, network and details boxes, as in btop, and give their room to the list and the log. The TUI remembers them in [your own config](#your-own-settings). The layout also drops the system boxes and then the details as the terminal shrinks; the mouse selects and scrolls.
 
 ## Install

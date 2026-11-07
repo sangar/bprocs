@@ -6,7 +6,6 @@
 #include "mc/text/unicode.h"
 #include "mc/term/ansi.h"
 #include "protocol.h"
-#include "theme.h"
 #include "ui.h"
 
 enum {
@@ -170,6 +169,22 @@ static void build_views(App *app)
     app->all.following = true;
 }
 
+// notice_omarchy_change reads the Omarchy theme again when the system's theme
+// has changed, so the TUI follows it.
+static void notice_omarchy_change(App *app)
+{
+    FileInfo info = { 0 };
+    if (file_info_follow(app->omarchy_path, &info, nullptr) != ERR_OK || info.mtime_ns == app->omarchy_mtime_ns) {
+        return;
+    }
+    String colors;
+    if (file_read_all(app->frame, app->omarchy_path, &colors, nullptr) == ERR_OK &&
+        theme_from_omarchy(app->frame, colors, &app->omarchy)) {
+        app->has_omarchy = true;
+        app->omarchy_mtime_ns = info.mtime_ns;
+    }
+}
+
 App *app_create(Client *client, size_t theme_index, ColorDepth color_depth, const UserConfig *user_config)
 {
     Arena *arena = arena_create(0);
@@ -179,6 +194,11 @@ App *app_create(Client *client, size_t theme_index, ColorDepth color_depth, cons
     app->views_arena = arena_create(0);
     app->client = client;
     app->theme_index = theme_index;
+    app->omarchy_path = omarchy_colors_path(arena);
+    notice_omarchy_change(app);
+    if (theme_index == theme_count() && !app->has_omarchy) {
+        app->theme_index = 0;
+    }
     app->user_config_path = str_copy(arena, user_config->path);
     app->shown_boxes = user_config->boxes;
     app->color_depth = color_depth;
@@ -957,10 +977,15 @@ static void toggle_box(App *app, LayoutBox box, const char *name)
     toast(app, app->shown_boxes & box ? "%s · shown" : "%s · hidden", name);
 }
 
+const Theme *app_theme(const App *app)
+{
+    return app->theme_index == theme_count() ? &app->omarchy : theme_at(app->theme_index);
+}
+
 static void next_theme(App *app)
 {
-    app->theme_index = (app->theme_index + 1) % theme_count();
-    toast(app, "theme · %s", theme_at(app->theme_index)->name);
+    app->theme_index = (app->theme_index + 1) % (theme_count() + app->has_omarchy);
+    toast(app, "theme · %s", app_theme(app)->name);
 }
 
 // ---- input ----
@@ -1389,6 +1414,7 @@ static void step(App *app)
     if (app->now_ns >= app->next_sample_ns) {
         system_stats_sample(&app->system, app->frame, app->now_ns);
         notice_config_change(app);
+        notice_omarchy_change(app);
         app->dirty = true;
         app->next_sample_ns += ms(SAMPLE_MS);
         if (app->next_sample_ns <= app->now_ns) {
