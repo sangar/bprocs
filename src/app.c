@@ -6,7 +6,6 @@
 #include "mc/text/unicode.h"
 #include "mc/term/ansi.h"
 #include "protocol.h"
-#include "theme.h"
 #include "ui.h"
 
 enum {
@@ -170,7 +169,8 @@ static void build_views(App *app)
     app->all.following = true;
 }
 
-App *app_create(Client *client, size_t theme_index, ColorDepth color_depth, const UserConfig *user_config)
+App *app_create(Client *client, size_t theme_index, String theme_path, ColorDepth color_depth,
+                const UserConfig *user_config)
 {
     Arena *arena = arena_create(0);
     App *app = arena_push(arena, sizeof *app);
@@ -179,6 +179,16 @@ App *app_create(Client *client, size_t theme_index, ColorDepth color_depth, cons
     app->views_arena = arena_create(0);
     app->client = client;
     app->theme_index = theme_index;
+    app->theme_path = str_copy(arena, theme_path);
+    if (theme_index == theme_count()) {
+        FileInfo info = { 0 };
+        Err err = { 0 };
+        if (file_info_follow(theme_path, &info, &err) != ERR_OK ||
+            theme_load(arena, theme_path, &app->file_theme, &err) != ERR_OK) {
+            app->theme_index = 0;
+        }
+        app->theme_mtime_ns = info.mtime_ns;
+    }
     app->user_config_path = str_copy(arena, user_config->path);
     app->shown_boxes = user_config->boxes;
     app->color_depth = color_depth;
@@ -856,6 +866,25 @@ static void notice_config_change(App *app)
     app->config_mtime_ns = mtime;
 }
 
+// notice_theme_change reads the theme file again when it has changed, as
+// Omarchy changes it when the system's theme changes.
+static void notice_theme_change(App *app)
+{
+    FileInfo info = { 0 };
+    if (app->theme_path.len == 0 || file_info_follow(app->theme_path, &info, nullptr) != ERR_OK ||
+        info.mtime_ns == app->theme_mtime_ns) {
+        return;
+    }
+    app->theme_mtime_ns = info.mtime_ns;
+    Theme theme;
+    Err err = { 0 };
+    if (theme_load(app->arena, app->theme_path, &theme, &err) != ERR_OK) {
+        toast(app, "%s", err.msg);
+        return;
+    }
+    app->file_theme = theme;
+}
+
 // ---- the project switcher ----
 
 static void open_switcher(App *app)
@@ -957,10 +986,15 @@ static void toggle_box(App *app, LayoutBox box, const char *name)
     toast(app, app->shown_boxes & box ? "%s · shown" : "%s · hidden", name);
 }
 
+const Theme *app_theme(const App *app)
+{
+    return app->theme_index == theme_count() ? &app->file_theme : theme_at(app->theme_index);
+}
+
 static void next_theme(App *app)
 {
-    app->theme_index = (app->theme_index + 1) % theme_count();
-    toast(app, "theme · %s", theme_at(app->theme_index)->name);
+    app->theme_index = (app->theme_index + 1) % (theme_count() + (app->theme_path.len > 0));
+    toast(app, "theme · %s", app_theme(app)->name);
 }
 
 // ---- input ----
@@ -1389,6 +1423,7 @@ static void step(App *app)
     if (app->now_ns >= app->next_sample_ns) {
         system_stats_sample(&app->system, app->frame, app->now_ns);
         notice_config_change(app);
+        notice_theme_change(app);
         app->dirty = true;
         app->next_sample_ns += ms(SAMPLE_MS);
         if (app->next_sample_ns <= app->now_ns) {

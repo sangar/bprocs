@@ -12,6 +12,7 @@
 #include "proc.h"
 #include "mc/term/screen.h"
 #include "stats.h"
+#include "theme.h"
 #include "userconfig.h"
 
 typedef enum Focus {
@@ -66,7 +67,10 @@ typedef struct App {
     size_t selected;    // a row
     size_t list_offset; // the first row the list shows
     Focus focus;
-    size_t theme_index;
+    size_t theme_index; // theme_count() for the theme file
+    Theme file_theme;
+    String theme_path; // empty without a theme file
+    int64_t theme_mtime_ns;
 
     Terminal *terminal;
     Screen *screen;
@@ -121,12 +125,17 @@ typedef struct App {
 } App;
 
 // app_create takes over client, which app_destroy closes.
-App *app_create(Client *client, size_t theme_index, ColorDepth color_depth, const UserConfig *user_config);
+// app_create draws in theme_index, or in the theme file at theme_path when
+// theme_index is theme_count().
+App *app_create(Client *client, size_t theme_index, String theme_path, ColorDepth color_depth,
+                const UserConfig *user_config);
 void app_destroy(App *app);
 // app_run takes over the terminal until the user quits or the daemon has
 // brought everything down at the user's request.
 [[nodiscard]] Error app_run(App *app, Err *err);
 
+// app_theme is the theme the TUI draws in.
+const Theme *app_theme(const App *app);
 // app_accent is the colour of process index in the current theme.
 Rgb app_accent(const App *app, size_t index);
 // app_waiting_for names the needs of process index that are not up yet, in the frame arena.

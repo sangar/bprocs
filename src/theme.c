@@ -1,5 +1,11 @@
 #include "theme.h"
 
+#include <stddef.h>
+
+#include "mc/encoding/yaml.h"
+#include "mc/platform/platform.h"
+#include "mc/text/path.h"
+
 static const Theme THEMES[] = {
     {
         .name = "tokyo-night",
@@ -152,4 +158,118 @@ bool theme_find(String name, size_t *index)
         }
     }
     return false;
+}
+
+static_assert(sizeof(Gradient) == 3 * sizeof(Rgb), "a gradient is three colours");
+
+// THEME_COLORS are the colours of a theme file and where they go in a Theme.
+static const struct {
+    const char *key;
+    size_t offset;
+    size_t count;
+} THEME_COLORS[] = {
+    { "background", offsetof(Theme, background), 1 },
+    { "surface", offsetof(Theme, surface), 1 },
+    { "border", offsetof(Theme, border), 1 },
+    { "focus", offsetof(Theme, focus), 1 },
+    { "text", offsetof(Theme, text), 1 },
+    { "muted", offsetof(Theme, muted), 1 },
+    { "faint", offsetof(Theme, faint), 1 },
+    { "highlight", offsetof(Theme, highlight), 1 },
+    { "selection", offsetof(Theme, selection), 1 },
+    { "running", offsetof(Theme, running), 1 },
+    { "starting", offsetof(Theme, starting), 1 },
+    { "stopped", offsetof(Theme, stopped), 1 },
+    { "failed", offsetof(Theme, failed), 1 },
+    { "cpu", offsetof(Theme, cpu), 3 },
+    { "memory", offsetof(Theme, memory), 3 },
+    { "download", offsetof(Theme, download), 3 },
+    { "upload", offsetof(Theme, upload), 3 },
+    { "accents", offsetof(Theme, accents), THEME_ACCENTS },
+    { "ansi", offsetof(Theme, ansi), 16 },
+};
+
+[[nodiscard]] static Error read_color(const Node *node, String key, Rgb *color, Err *err)
+{
+    if (node->kind != NODE_STRING || !rgb_parse(node->text, color)) {
+        return err_set(err, ERR_PARSE, "line %zu: %.*s: expected a colour, like \"#7aa2f7\"", node->line,
+                       (int)key.len, key.data);
+    }
+    return ERR_OK;
+}
+
+[[nodiscard]] static Error read_colors(const Node *node, String key, Rgb *colors, size_t count, Err *err)
+{
+    if (count == 1) {
+        return read_color(node, key, colors, err);
+    }
+    if (node->kind != NODE_SEQUENCE || node->count != count) {
+        return err_set(err, ERR_PARSE, "line %zu: %.*s: expected a list of %zu colours", node->line, (int)key.len,
+                       key.data, count);
+    }
+    for (size_t i = 0; i < count; i++) {
+        Error e = read_color(node->items[i], key, &colors[i], err);
+        if (e != ERR_OK) {
+            return e;
+        }
+    }
+    return ERR_OK;
+}
+
+static bool theme_color_named(String key, size_t *index)
+{
+    for (size_t i = 0; i < countof(THEME_COLORS); i++) {
+        if (str_equal(key, S(THEME_COLORS[i].key))) {
+            *index = i;
+            return true;
+        }
+    }
+    return false;
+}
+
+Error theme_parse(Arena *arena, String text, Theme *theme, Err *err)
+{
+    Node *root;
+    Error parsed = yaml_parse(arena, text, &root, err);
+    if (parsed != ERR_OK) {
+        return parsed;
+    }
+    if (root->kind != NODE_MAPPING) {
+        return err_set(err, ERR_PARSE, "line %zu: expected colours, like background: \"#1a1b26\"", root->line);
+    }
+    bool seen[countof(THEME_COLORS)] = { 0 };
+    for (size_t i = 0; i < root->entry_count; i++) {
+        String key = root->entries[i].key;
+        size_t index;
+        if (!theme_color_named(key, &index)) {
+            return err_set(err, ERR_PARSE, "line %zu: %.*s: unknown colour", root->entries[i].value->line,
+                           (int)key.len, key.data);
+        }
+        Rgb *colors = (Rgb *)((char *)theme + THEME_COLORS[index].offset);
+        Error e = read_colors(root->entries[i].value, key, colors, THEME_COLORS[index].count, err);
+        if (e != ERR_OK) {
+            return e;
+        }
+        seen[index] = true;
+    }
+    for (size_t i = 0; i < countof(THEME_COLORS); i++) {
+        if (!seen[i]) {
+            return err_set(err, ERR_PARSE, "no %s colour", THEME_COLORS[i].key);
+        }
+    }
+    return ERR_OK;
+}
+
+Error theme_load(Arena *arena, String path, Theme *theme, Err *err)
+{
+    String text;
+    Error e = file_read_all(arena, path, &text, err);
+    if (e == ERR_OK) {
+        e = theme_parse(arena, text, theme, err);
+    }
+    if (e != ERR_OK) {
+        return err_wrap(err, e, "%.*s", (int)path.len, path.data);
+    }
+    theme->name = str_cstr(arena, str_trim_suffix(path_base(path), S(".yml")));
+    return ERR_OK;
 }
